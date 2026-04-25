@@ -702,8 +702,7 @@ function renderPortfolio(){
             ${t.demo?`<div style="flex:1;padding:5px 7px;background:var(--CB);border:1px solid var(--CBR);border-radius:6px;text-align:right">
               <div style="font-size:8px;color:var(--tx3);margin-bottom:1px">💰 ארנק דמו</div>
               <div id="pf-wallet-${i}" style="font-size:11px;font-weight:700;color:var(--G)">$${PT_demoWallet(t).toFixed(2)}</div>
-              ${(t.budget) ? `<div style="font-size:8px;color:var(--tx3)">מתוך $${parseFloat(t.budget).toFixed(0)}</div>` : `<div style="font-size:8px;color:var(--tx3)">השקעה פעילה</div>`}
-              <div style="font-size:8px;color:var(--tx3)">$${parseFloat((t.settings&&t.settings.amount)||10)} לעסקה</div>
+              <div style="font-size:8px;color:var(--tx3)">מתוך $${parseFloat(t.budget||1000).toFixed(0)} | $${parseFloat((t.settings&&t.settings.amount)||10)}/עסקה</div>
             </div>`:''}
             <div style="flex:1;padding:5px 7px;background:var(--CB);border:1px solid var(--CBR);border-radius:6px;text-align:right">
               <div style="font-size:8px;color:var(--tx3);margin-bottom:1px">📊 פורטפוליו</div>
@@ -865,33 +864,43 @@ function openPD(i,hist){
 }
 async function soldPos(portfIdx,posId,rowIdx){
   var t=PORTF[portfIdx];
-  // Find position by id or by index
-  var p=(t.openPos||[]).find(function(x){return x.id===posId;});
-  if(!p) p=(t.openPos||[])[rowIdx];
-  if(!p) return;
+  var posIdx=(t.openPos||[]).findIndex(function(x){return x.id===posId;});
+  if(posIdx===-1) posIdx=rowIdx;
+  var p=(t.openPos||[])[posIdx];
+  if(!p||p.sold) return;
 
-  // Mark sold
-  p.sold=true;
-  p.soldAt=new Date().toISOString();
-  p.sellPrice=parseFloat(p.cur||0);
-  var pnl=parseFloat(p.pnl||0);
+  // Get current price from cache
+  var cached=PT_priceCache[p.slug||''];
+  var side=(p.side||'YES').toUpperCase();
+  var curP=cached?(side==='YES'?cached.yes:cached.no):parseFloat(p.cur||p.entry||0.5);
+  var cost=parseFloat(p.ourCost||3);
+  var entry=parseFloat(p.entry||0.5);
+  var shares=entry>0?cost/entry:0;
+  var curVal=shares*curP;
+  var pnl=parseFloat((curVal-cost).toFixed(4));
+  var pp=cost>0?parseFloat((pnl/cost*100).toFixed(1)):0;
   var isWin=pnl>=0;
 
-  // Move to history array (shown in היסטוריה tab)
-  if(!t.history) t.history=[];
-  t.history.unshift({
-    q:p.q, side:(p.side||'YES'), ourCost:p.ourCost||p.size||0,
-    entry:p.entry, cur:p.cur, pnl:pnl, pp:p.pp||0,
-    sold:true, soldAt:p.soldAt, sellPrice:p.sellPrice,
-    slug:p.slug||'', openedAt:p.openedAt||''
-  });
+  // Update position locally (optimistic)
+  p.sold=true; p.pnl=pnl; p.pp=pp; p.cur=curP;
+  p.soldAt=new Date().toISOString();
+
+  // Call backend to persist the close
+  if(p.id && PT_uid){
+    try{
+      await fetch(BACKEND+'/api/copy/history/close',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({trade_id:p.id, price_exit:parseFloat(curP.toFixed(4)),
+          pnl_usd:pnl, user_id:PT_uid})
+      });
+    }catch(e){console.warn('Close error:',e);}
+  }
 
   notif((isWin?'✅ זכיה +$':'❌ הפסד -$')+Math.abs(pnl).toFixed(2));
-
-  PT_saveState();
   openPD(portfIdx,false);
   renderPortfolio();
-  setTimeout(function(){ PT_calcPeriodPnl(portfIdx); PT_updateDemoWallets(); }, 400);
+  setTimeout(function(){PT_calcPeriodPnl(portfIdx);PT_updateDemoWallets();PT_loadCopyData();},800);
 }
 function sellAllPos(portfIdx){
   showConfirm('מכירת כל הפוזיציות','האם אתה בטוח שאתה רוצה למכור את כל הפוזיציות הפתוחות?',()=>{
@@ -2244,21 +2253,24 @@ async function PT_loadCopyData() {
                        return s; // live P&L computed per position above
                      }, 0);
 
+      // Preserve budget from existing PORTF entry if it exists
+      var existingEntry = PORTF.find(function(p){ return p.settingId === s.id; });
+      var savedBudget = existingEntry ? existingEntry.budget : null;
+
       return {
         n:          s.trader_name || ('@' + s.trader_address.slice(2,8)),
-        roi:        positions.length > 0 ?
-                    parseFloat((positions.reduce(function(sum,p){
-                      return sum + parseFloat(p.percentPnl||0);
-                    }, 0) / positions.length).toFixed(1)) : 0,
+        roi:        parseFloat(totalPnl.toFixed(1)),
         days:       Math.floor((Date.now() - new Date(s.created_at||Date.now()).getTime()) / 86400000),
         inv:        s.entry_mode === 'percent' ? s.entry_amount + '% מהתיק' : '$' + s.entry_amount,
         pnl:        parseFloat(totalPnl.toFixed(2)),
         active:     s.is_active,
-        demo:       true,  // Will be false when real trading enabled
+        demo:       true,
         openPos:    openPos,
+        history:    historyPos,   // closed trades from DB
         traderAddr: s.trader_address,
         settingId:  s.id,
         copyTrades: myTrades,
+        budget:     savedBudget || 1000,  // default $1000 demo budget
         settings:   {
           mode:     s.entry_mode === 'percent' ? 'pct' : 'fixed',
           amount:   s.entry_amount,
@@ -2276,6 +2288,7 @@ async function PT_loadCopyData() {
       setTimeout(function(){
         PT_updateAllPeriods();
         PT_updateDemoWallets();
+        PT_startRealtime(); // refresh prices for new positions
       }, 500);
     }
 
@@ -2588,50 +2601,45 @@ function PT_loadDeletedSettings() {
 
 // ── Demo wallet balance calculation ──────────────────────────────
 function PT_demoWallet(t) {
+  var budget   = parseFloat(t.budget || 1000);
   var entryAmt = parseFloat((t.settings && t.settings.amount) || 10);
   var openPos  = (t.openPos || []).filter(function(p){ return !p.sold; });
 
-  // Money locked in open positions (using OUR entry amount, never trader's value)
-  var locked = openPos.reduce(function(s,p){
-    return s + parseFloat(p.ourCost || entryAmt);
+  // Money locked in open positions
+  var locked = openPos.reduce(function(s,p){ return s + parseFloat(p.ourCost || entryAmt); }, 0);
+
+  // Cash returned from closed positions (even at loss, you get back something)
+  var allClosed = PT_allClosed(t);
+  var cashBack = allClosed.reduce(function(s,p){
+    var cost = parseFloat(p.ourCost || entryAmt);
+    var pnl  = parseFloat(p.pnl || 0);
+    return s + Math.max(0, cost + pnl); // returns 0 on total loss
   }, 0);
 
-  // Realized P&L from closed positions
-  var closed = (t.history || []).concat(
-    (t.openPos||[]).filter(function(p){ return p.sold; })
-  );
-  var netPnl = closed.reduce(function(s,p){ return s + parseFloat(p.pnl || 0); }, 0);
-
-  if (t.budget) {
-    // Budget mode: show remaining cash
-    return Math.max(0, parseFloat(t.budget) - locked + netPnl);
-  } else {
-    // No budget: show total invested (locked amount)
-    return locked;
-  }
+  // Available cash = budget - money locked + money returned from closes
+  return Math.max(0, budget - locked + cashBack);
 }
 
-// Portfolio value = total invested (open) + realized P&L (closed)
+// Helper: all closed/sold positions (deduped by id)
+function PT_allClosed(t) {
+  var fromHistory = t.history || [];
+  var localSold   = (t.openPos||[]).filter(function(p){ return p.sold; });
+  var ids = new Set(fromHistory.map(function(h){ return h.id; }));
+  var extras = localSold.filter(function(p){ return p.id && !ids.has(p.id); });
+  return fromHistory.concat(extras);
+}
+
+// Portfolio = initial budget + all P&L (realized + unrealized)
 function PT_portfolioValue(t) {
-  var entryAmt = parseFloat((t.settings && t.settings.amount) || 10);
+  var budget   = parseFloat(t.budget || 1000);
   var openPos  = (t.openPos || []).filter(function(p){ return !p.sold; });
-  var closed   = (t.history || []).concat((t.openPos||[]).filter(function(p){ return p.sold; }));
+  var allClosed = PT_allClosed(t);
 
-  // Locked = our money in open positions
-  var locked = openPos.reduce(function(s,p){
-    return s + parseFloat(p.ourCost || entryAmt);
-  }, 0);
+  var realizedPnl   = allClosed.reduce(function(s,p){ return s + parseFloat(p.pnl||0); }, 0);
+  var unrealizedPnl = openPos.reduce(function(s,p){   return s + parseFloat(p.pnl||0); }, 0);
 
-  // Unrealized P&L
-  var unrealized = openPos.reduce(function(s,p){
-    return s + parseFloat(p.pnl || 0);
-  }, 0);
-
-  // Realized P&L
-  var realized = closed.reduce(function(s,p){ return s + parseFloat(p.pnl || 0); }, 0);
-
-  // Portfolio = locked amount + all P&L
-  return Math.max(0, locked + unrealized + realized);
+  // Portfolio = budget + all gains/losses
+  return Math.max(0, budget + realizedPnl + unrealizedPnl);
 }
 
 // Update demo wallet display in real-time
@@ -2650,7 +2658,7 @@ function PT_updateDemoWallets() {
       }
     }
 
-    // Update portfolio value (both demo and real)
+    // Update portfolio value
     var pv = document.getElementById('pf-portval-'+i);
     if (pv) {
       var portVal = t.demo ? PT_portfolioValue(t) : 0;
