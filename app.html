@@ -703,6 +703,7 @@ function renderPortfolio(){
               <div style="font-size:8px;color:var(--tx3);margin-bottom:1px">💰 ארנק דמו</div>
               <div id="pf-wallet-${i}" style="font-size:11px;font-weight:700;color:var(--G)">$${PT_demoWallet(t).toFixed(2)}</div>
               ${(t.budget) ? `<div style="font-size:8px;color:var(--tx3)">מתוך $${parseFloat(t.budget).toFixed(0)}</div>` : `<div style="font-size:8px;color:var(--tx3)">השקעה פעילה</div>`}
+              <div style="font-size:8px;color:var(--tx3)">$${parseFloat((t.settings&&t.settings.amount)||10)} לעסקה</div>
             </div>`:''}
             <div style="flex:1;padding:5px 7px;background:var(--CB);border:1px solid var(--CBR);border-radius:6px;text-align:right">
               <div style="font-size:8px;color:var(--tx3);margin-bottom:1px">📊 פורטפוליו</div>
@@ -2184,30 +2185,42 @@ async function PT_loadCopyData() {
       var openTrades = myTrades.filter(function(t){ return t.status === 'demo'; });
       var closedTrades = myTrades.filter(function(t){ return t.status === 'closed'; });
 
-      var openPos = openTrades.map(function(t) {
-        // Find matching Poligarch position for current price
-        var matchPos = positions.find(function(p){
-          return p.conditionId === t.market_id || p.market_id === t.market_id;
-        });
-        var curPrice = matchPos ? parseFloat(matchPos.curPrice || t.price_entry || 0) : parseFloat(t.price_entry || 0);
+      // Deduplicate by tx_hash — show each unique trade once
+      var seenTx = new Set();
+      var uniqueTrades = openTrades.filter(function(t){
+        var key = t.tx_hash || ('id_'+t.id);
+        if (seenTx.has(key)) return false;
+        seenTx.add(key);
+        return true;
+      });
+
+      var openPos = uniqueTrades.map(function(t) {
+        var side = (t.side || 'YES').toUpperCase();
         var entryPrice = parseFloat(t.price_entry || 0.5);
-        var pnl = entryPrice > 0 ? entryAmt * ((curPrice - entryPrice) / entryPrice) : 0;
+        // Use price cache if available, else fall back to entry price
+        var cached = PT_priceCache[t.market_id];
+        var curPrice = cached ? (side === 'YES' ? cached.yes : cached.no) : entryPrice;
+        // shares = cost / entryPrice; curVal = shares * curPrice
+        var shares = entryPrice > 0 ? entryAmt / entryPrice : 0;
+        var curVal  = shares * curPrice;
+        var pnl     = curVal - entryAmt;
+        var pp      = entryAmt > 0 ? (pnl / entryAmt * 100) : 0;
         return {
           id:       t.id,
           q:        t.market || t.market_question || 'שאלה',
-          side:     (t.side || 'YES').toUpperCase(),
+          side:     side,
           entry:    entryPrice,
           cur:      curPrice,
           pnl:      parseFloat(pnl.toFixed(4)),
-          pp:       entryPrice > 0 ? ((curPrice - entryPrice) / entryPrice * 100) : 0,
+          pp:       parseFloat(pp.toFixed(1)),
           ourCost:  entryAmt,
           size:     entryAmt,
           sold:     false,
           openedAt: t.opened_at || new Date().toISOString(),
-          slug:     t.market_id || ''
+          slug:     t.market_id || '',
+          txHash:   t.tx_hash || ''
         };
       });
-
       // History = our closed trades
       var historyPos = closedTrades.map(function(t){
         return {
@@ -2389,52 +2402,92 @@ function PT_startCopyPolling() {
 
 
 
-// ── Real-time position price updates ─────────────────────────────
+// ── Price cache + real-time updates via Gamma API ───────────────
+// PT_priceCache[conditionId] = {yes: float, no: float, ts: ms}
+var PT_priceCache = {};
 var _rtInterval = null;
 
-async function PT_updatePositionPrices() {
-  // For each active copy in PORTF, refresh positions from backend
-  for (var i = 0; i < PORTF.length; i++) {
-    var p = PORTF[i];
-    if (!p.active || !p.traderAddr) continue;
-    try {
-      var posData = await PT_fetch('https://polytrade-backend-production.up.railway.app/api/copy/positions/' + p.traderAddr);
-      if (!posData || !Array.isArray(posData)) continue;
-
-      // Update each position's current price and P&L
-      posData.forEach(function(pos, j) {
-        var curEl  = document.getElementById('cur_'+i+'_'+j);
-        var pnlEl  = document.getElementById('pnl_'+i+'_'+j);
-        if (!curEl || !pnlEl) return;
-
-        var curC   = Math.round(parseFloat(pos.curPrice||0)*100);
-        var pnlAbs = parseFloat(pos.cashPnl||0);
-        var ppVal  = parseFloat(pos.percentPnl||0);
-        var isWin  = pnlAbs >= 0;
-        var cost   = parseFloat(pos.currentValue||0);
-
-        curEl.textContent = curC + '¢';
-        pnlEl.className = isWin ? 'pp' : 'pn_';
-        pnlEl.textContent = (isWin?'+':'') + pnlAbs.toFixed(2) + '$ (' + (isWin?'+':'') + ppVal.toFixed(1) + '%)';
-
-        // Update stored position data
-        if (PORTF[i].openPos && PORTF[i].openPos[j]) {
-          PORTF[i].openPos[j].cur = parseFloat(pos.curPrice||0);
-          PORTF[i].openPos[j].pnl = pnlAbs;
-          PORTF[i].openPos[j].pp  = ppVal;
-        }
-      });
-    } catch(e) {}
-  }
+async function PT_fetchMarketPrice(conditionId) {
+  try {
+    var r = await fetch('https://gamma-api.polymarket.com/markets?conditionId=' + conditionId);
+    if (!r.ok) return null;
+    var data = await r.json();
+    var markets = Array.isArray(data) ? data : (data.markets || []);
+    if (!markets.length) return null;
+    var m = markets[0];
+    var op = m.outcomePrices;
+    if (typeof op === 'string') { try { op = JSON.parse(op); } catch(e) { op = null; } }
+    if (!op || !op.length) return null;
+    return { yes: parseFloat(op[0]) || 0.5, no: parseFloat(op[1]) || 0.5 };
+  } catch(e) { return null; }
 }
+
+async function PT_refreshAllPrices() {
+  // Collect all unique conditionIds from open positions across all PORTF entries
+  var ids = new Set();
+  PORTF.forEach(function(p) {
+    (p.openPos || []).forEach(function(pos) { if (pos.slug) ids.add(pos.slug); });
+  });
+  if (!ids.size) return;
+
+  // Fetch prices in parallel (max 20 at once)
+  var idArr = Array.from(ids).slice(0, 20);
+  var results = await Promise.allSettled(idArr.map(function(id) {
+    return PT_fetchMarketPrice(id).then(function(p) { return {id: id, p: p}; });
+  }));
+
+  // Update cache
+  var now = Date.now();
+  results.forEach(function(r) {
+    if (r.status === 'fulfilled' && r.value && r.value.p) {
+      PT_priceCache[r.value.id] = Object.assign({ts: now}, r.value.p);
+    }
+  });
+
+  // Update DOM for all open positions
+  PORTF.forEach(function(portfEntry, pi) {
+    (portfEntry.openPos || []).forEach(function(pos, j) {
+      if (!pos.slug || pos.sold) return;
+      var cached = PT_priceCache[pos.slug];
+      if (!cached) return;
+      var side = pos.side || 'YES';
+      var newCur = side === 'YES' ? cached.yes : cached.no;
+      var entryPrice = pos.entry || 0.5;
+      var cost = pos.ourCost || 3;
+      var shares = entryPrice > 0 ? cost / entryPrice : 0;
+      var newPnl = shares * newCur - cost;
+      var newPp  = cost > 0 ? (newPnl / cost * 100) : 0;
+
+      // Update stored values
+      pos.cur = newCur;
+      pos.pnl = parseFloat(newPnl.toFixed(4));
+      pos.pp  = parseFloat(newPp.toFixed(1));
+
+      // Update DOM if open trades list is visible
+      var curEl = document.getElementById('cur_'+pi+'_'+j);
+      var pnlEl = document.getElementById('pnl_'+pi+'_'+j);
+      var ppEl  = document.getElementById('pp_'+pi+'_'+j);
+      if (curEl) curEl.textContent = Math.round(newCur*100) + '¢';
+      if (pnlEl) {
+        pnlEl.className = newPnl >= 0 ? 'pp' : 'pn_';
+        pnlEl.textContent = (newPnl>=0?'+':'')+newPnl.toFixed(2)+'$ ('+(newPp>=0?'+':'')+newPp.toFixed(1)+'%)';
+      }
+      if (ppEl) {
+        ppEl.className = newPp >= 0 ? 'pp' : 'pn_';
+        ppEl.textContent = '(' + (newPp>=0?'+':'') + newPp.toFixed(1) + '%)';
+      }
+    });
+  });
+}
+
+// Keep old function name for compatibility
+async function PT_updatePositionPrices() { await PT_refreshAllPrices(); }
 
 function PT_startRealtime() {
   if (_rtInterval) clearInterval(_rtInterval);
-  // Update prices every 30 seconds
-  _rtInterval = setInterval(PT_updatePositionPrices, 10000);
-  console.log('✅ Real-time price updates started (every 30s)');
+  _rtInterval = setInterval(PT_refreshAllPrices, 10000); // every 10 seconds
+  PT_refreshAllPrices(); // immediate first fetch
 }
-
 
 
 // ── Portfolio period P&L ─────────────────────────────────────────
