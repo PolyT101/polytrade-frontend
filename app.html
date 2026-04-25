@@ -2668,18 +2668,19 @@ function PT_demoWallet(t) {
   var entryAmt = parseFloat((t.settings && t.settings.amount) || 10);
   var openPos  = (t.openPos || []).filter(function(p){ return !p.sold; });
 
-  // Money locked in open positions
-  var locked = openPos.reduce(function(s,p){ return s + parseFloat(p.ourCost || entryAmt); }, 0);
+  // Money locked — capped at budget (old/duplicate trades can't exceed budget)
+  var rawLocked = openPos.reduce(function(s,p){ return s + parseFloat(p.ourCost || entryAmt); }, 0);
+  var locked = Math.min(rawLocked, budget);
 
-  // Cash returned from closed positions (even at loss, you get back something)
+  // Cash returned from closed positions
   var allClosed = PT_allClosed(t);
   var cashBack = allClosed.reduce(function(s,p){
     var cost = parseFloat(p.ourCost || entryAmt);
     var pnl  = parseFloat(p.pnl || 0);
-    return s + Math.max(0, cost + pnl); // returns 0 on total loss
+    return s + Math.max(0, cost + pnl);
   }, 0);
 
-  // Available cash = budget - money locked + money returned from closes
+  // Available cash = budget - locked + cash returned
   return Math.max(0, budget - locked + cashBack);
 }
 
