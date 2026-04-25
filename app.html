@@ -2141,6 +2141,13 @@ async function PT_loadCopyData() {
         };
       });
 
+      // Calculate total PnL from our copy trades
+      var totalPnl = closedTrades.reduce(function(s,t){ return s + parseFloat(t.pnl||0); }, 0)
+                   + openTrades.reduce(function(s,t){
+                       var ep = parseFloat(t.price_entry||0.5);
+                       return s; // live P&L computed per position above
+                     }, 0);
+
       return {
         n:          s.trader_name || ('@' + s.trader_address.slice(2,8)),
         roi:        positions.length > 0 ?
