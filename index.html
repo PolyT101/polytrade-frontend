@@ -492,6 +492,8 @@ function setV(page,cls,onBtn,offBtn){var ids={analyst:'acards',scanner:'scards',
 
 function go(id,btn){
   if(id!=='profile'&&id!=='pdtl') ppg=id;
+  if(id!=='pdtl'){_openPDIdx=-1;_openPDHist=false;}
+  if(id!=='pdtl'){_openPDIdx=-1;_openPDHist=false;} // reset panel tracking
   document.querySelectorAll('.ni').forEach(b=>b.classList.remove('on'));
   document.querySelectorAll('.pg').forEach(p=>p.classList.remove('on'));
   if(btn&&btn.classList&&btn.classList.contains('ni')) btn.classList.add('on');
@@ -905,8 +907,12 @@ async function soldPos(portfIdx,posId,rowIdx){
   notif((isWin?'✅ זכיה +$':'❌ הפסד -$')+Math.abs(pnl).toFixed(2));
   openPD(portfIdx,false);
   renderPortfolio();
-  _openPDIdx=portfIdx; _openPDHist=true; // will show history after reload
-  setTimeout(function(){PT_loadCopyData();},1500); // give backend time to process
+  _openPDIdx=portfIdx; _openPDHist=true;
+  // Immediate wallet/portfolio update (optimistic)
+  PT_updateDemoWallets();
+  renderPortfolio();
+  // Reload from backend after 2s (give time for DB to process close)
+  setTimeout(function(){PT_loadCopyData();}, 2000);
 }
 function sellAllPos(portfIdx){
   showConfirm('מכירת כל הפוזיציות','האם אתה בטוח שאתה רוצה למכור את כל הפוזיציות הפתוחות?',()=>{
@@ -2170,7 +2176,7 @@ async function PT_loadCopyData() {
 
     // Load copy history (demo trades)
     var historyRes = await PT_fetch(
-      'https://polytrade-backend-production.up.railway.app/api/copy/history?user_id=' + encodeURIComponent(PT_uid) + '&limit=100'
+      'https://polytrade-backend-production.up.railway.app/api/copy/history?user_id=' + encodeURIComponent(PT_uid) + '&limit=500'
     );
     var history = historyRes && Array.isArray(historyRes) ? historyRes : [];
 
@@ -2189,10 +2195,10 @@ async function PT_loadCopyData() {
       );
       var positions = posData && Array.isArray(posData) ? posData : [];
 
-      // Get copy trades for this setting
+      // Get copy trades for this setting (by setting_id when available)
       var myTrades = history.filter(function(t) {
-        return t.trader === s.trader_address ||
-               t.copy_settings_id === s.id;
+        if (t.copy_settings_id != null) return t.copy_settings_id === s.id;
+        return t.trader === s.trader_address; // fallback for old trades without setting_id
       });
 
       // OUR open copy trades (status='demo' = open, not yet closed)
