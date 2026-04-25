@@ -627,7 +627,7 @@ function renderPortfolio(){
             ${t.demo?`<div style="flex:1;padding:5px 7px;background:var(--CB);border:1px solid var(--CBR);border-radius:6px;text-align:right">
               <div style="font-size:8px;color:var(--tx3);margin-bottom:1px">💰 ארנק דמו</div>
               <div id="pf-wallet-${i}" style="font-size:11px;font-weight:700;color:var(--G)">$${PT_demoWallet(t).toFixed(2)}</div>
-              <div style="font-size:8px;color:var(--tx3)">מתוך $${(t.budget||(t.settings&&t.settings.budget)||1000).toFixed(0)}</div>
+              ${(t.budget) ? `<div style="font-size:8px;color:var(--tx3)">מתוך $${parseFloat(t.budget).toFixed(0)}</div>` : `<div style="font-size:8px;color:var(--tx3)">השקעה פעילה</div>`}
             </div>`:''}
             <div style="flex:1;padding:5px 7px;background:var(--CB);border:1px solid var(--CBR);border-radius:6px;text-align:right">
               <div style="font-size:8px;color:var(--tx3);margin-bottom:1px">📊 פורטפוליו</div>
@@ -2243,12 +2243,12 @@ async function PT_startCopy(traderAddr, traderName, settings) {
         };
       }) : [];
 
-      var budget = parseFloat(settings.budget || 1000);
+      var budget = parseFloat(settings.budget) || null; // null = no fixed budget
       PORTF.unshift({
         n:traderName, roi:0, days:0,
         inv: settings.mode==='pct' ? settings.amount+'% מהתיק' : '$'+settings.amount,
         pnl:0, active:true, demo:true,
-        openPos:openPos,
+        openPos:[], // will be populated by PT_loadCopyData from DB
         traderAddr:traderAddr,
         settingId:d.id,
         budget: budget,
@@ -2452,52 +2452,50 @@ function PT_loadDeletedSettings() {
 
 // ── Demo wallet balance calculation ──────────────────────────────
 function PT_demoWallet(t) {
-  var budget = parseFloat(t.budget || (t.settings && t.settings.budget) || 1000);
   var entryAmt = parseFloat((t.settings && t.settings.amount) || 10);
+  var openPos  = (t.openPos || []).filter(function(p){ return !p.sold; });
 
-  // Open positions = money currently locked
-  var openPos = (t.openPos || []).filter(function(p){ return !p.sold; });
-  var locked  = openPos.reduce(function(s,p){
-    return s + parseFloat(p.ourCost || p.size || p.amount || entryAmt);
+  // Money locked in open positions (using OUR entry amount, never trader's value)
+  var locked = openPos.reduce(function(s,p){
+    return s + parseFloat(p.ourCost || entryAmt);
   }, 0);
 
-  // Cap locked at budget (can't lock more than we have)
-  locked = Math.min(locked, budget);
-
-  // Closed positions net P&L
+  // Realized P&L from closed positions
   var closed = (t.history || []).concat(
     (t.openPos||[]).filter(function(p){ return p.sold; })
   );
-  var netPnl = closed.reduce(function(s,p){
+  var netPnl = closed.reduce(function(s,p){ return s + parseFloat(p.pnl || 0); }, 0);
+
+  if (t.budget) {
+    // Budget mode: show remaining cash
+    return Math.max(0, parseFloat(t.budget) - locked + netPnl);
+  } else {
+    // No budget: show total invested (locked amount)
+    return locked;
+  }
+}
+
+// Portfolio value = total invested (open) + realized P&L (closed)
+function PT_portfolioValue(t) {
+  var entryAmt = parseFloat((t.settings && t.settings.amount) || 10);
+  var openPos  = (t.openPos || []).filter(function(p){ return !p.sold; });
+  var closed   = (t.history || []).concat((t.openPos||[]).filter(function(p){ return p.sold; }));
+
+  // Locked = our money in open positions
+  var locked = openPos.reduce(function(s,p){
+    return s + parseFloat(p.ourCost || entryAmt);
+  }, 0);
+
+  // Unrealized P&L
+  var unrealized = openPos.reduce(function(s,p){
     return s + parseFloat(p.pnl || 0);
   }, 0);
 
-  // Available cash = budget - locked + realized P&L
-  // Never goes negative
-  return Math.max(0, budget - locked + netPnl);
-}
+  // Realized P&L
+  var realized = closed.reduce(function(s,p){ return s + parseFloat(p.pnl || 0); }, 0);
 
-// Portfolio value = cash + unrealized P&L from open positions
-function PT_portfolioValue(t) {
-  var cash = PT_demoWallet(t);
-  var entryAmt = parseFloat((t.settings && t.settings.amount) || 10);
-
-  // Unrealized P&L from open positions
-  var openPos = (t.openPos || []).filter(function(p){ return !p.sold; });
-  var unrealized = openPos.reduce(function(s,p){
-    var pnl = parseFloat(p.pnl || 0);
-    // Can't count gains that exceed position cost
-    var cost = parseFloat(p.ourCost || p.size || entryAmt);
-    return s + Math.max(-cost, pnl); // loss capped at full cost
-  }, 0);
-
-  // Portfolio = cash + locked positions current value
-  var locked = openPos.reduce(function(s,p){
-    return s + parseFloat(p.ourCost || p.size || entryAmt);
-  }, 0);
-  locked = Math.min(locked, parseFloat(t.budget || 1000));
-
-  return Math.max(0, cash + locked + unrealized);
+  // Portfolio = locked amount + all P&L
+  return Math.max(0, locked + unrealized + realized);
 }
 
 // Update demo wallet display in real-time
