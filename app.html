@@ -2028,6 +2028,18 @@ document.addEventListener('change', function(e) {
 // Save before page unload
 window.addEventListener('beforeunload', PT_saveState);
 
+// ── Startup: restore session + state ────────────────────────────
+document.addEventListener('DOMContentLoaded', function PT_startup() {
+  PT_loadDeletedSettings();
+  PT_loadState();
+  PT_updateBtn();
+  PT_updateStatus();
+  if (PT_tok && PT_uid) {
+    PT_loadDash();
+    setTimeout(PT_loadCopyData, 300);
+  }
+});
+
 
 
 // ── Load real copy data from backend ─────────────────────────────
