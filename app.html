@@ -1421,11 +1421,8 @@ async function PT_loadMarkets() {
 
 // ── Load real traders ─────────────────────────────────────────────
 var PT_tradersLoaded = false;
-// Known top Polymarket traders — real public addresses
-var PT_TOP_TRADERS = [
-  {addr:'0xb40e89677d59665d5188541ad860450a6e2a7cc9', name:'@Poligarch'}
-  // הוסף כאן כתובות אמיתיות של טריידרים מ-polymarket.com/leaderboard
-];
+// Known top Polymarket traders — fallback only if all APIs fail
+var PT_TOP_TRADERS = [];
 
 async function PT_loadTraders(offset) {
   offset = offset || 0;
@@ -1437,21 +1434,37 @@ async function PT_loadTraders(offset) {
     // Try direct Polymarket APIs (CORS allowed from browser)
     var data = null;
     // Backend proxy is needed — direct Polymarket blocks CORS from Netlify
+    // Direct browser call first (CORS open) — bypasses Railway Cloudflare block
     var sources = [
+      'https://data-api.polymarket.com/v1/leaderboard?limit=500&timePeriod=all&orderBy=pnl',
+      'https://data-api.polymarket.com/v1/leaderboard?limit=500&timePeriod=month&orderBy=pnl',
       'https://polytrade-backend-production.up.railway.app/api/traders?limit=500&offset='+offset+'&period=all&order=pnl',
-      'https://polytrade-backend-production.up.railway.app/api/pm/leaderboard?limit=500&offset='+offset+'&period=all&order=pnl',
     ];
     for (var _si=0; _si<sources.length; _si++) {
       try {
         var _d = await PT_fetch(sources[_si]);
         if (_d) {
           var _arr = Array.isArray(_d) ? _d : (_d.traders||_d.data||_d.profiles||_d.leaderboard||[]);
-          // normalize field names from v1/leaderboard
-          _arr = _arr.map(function(t){ return Object.assign({}, t, {
-            name:    t.name    || t.userName || t.pseudonym || '',
-            volume:  t.volume  || t.vol      || 0,
-            address: t.address || t.proxyWallet || '',
-          }); });
+          // normalize v1/leaderboard field names → internal format
+          _arr = _arr.map(function(t) {
+            var addr = t.proxyWallet || t.address || '';
+            var vol  = parseFloat(t.vol || t.volume || 0);
+            var pnl  = parseFloat(t.pnl || 0);
+            return {
+              proxyWallet: addr,
+              address: addr,
+              name:    t.userName || t.name || t.pseudonym || ('@'+addr.slice(2,8)+'...'+addr.slice(-4)),
+              pnl:     pnl,
+              roi:     vol > 0 ? parseFloat((pnl/vol*100).toFixed(1)) : 0,
+              volume:  vol,
+              vol:     vol,
+              win_rate:   t.win_rate || t.winRate || 0,
+              trades_count: t.trades_count || t.numTrades || 0,
+              rank:    parseInt(t.rank || 0),
+              verified: t.verifiedBadge || false,
+              profile_image: t.profileImage || '',
+            };
+          });
           if (_arr.length > 0) { data = _arr; break; }
         }
       } catch(e) { continue; }
@@ -2063,19 +2076,12 @@ async function PT_loadCopyData() {
     var history = historyRes && Array.isArray(historyRes) ? historyRes : [];
 
     // Build PORTF from real settings + history
-    // Filter: not locally deleted AND (is_active OR user explicitly kept)
+    // Show ALL settings (active or stopped) unless user explicitly deleted them
     var activeSettings = settingsRes.filter(function(s) {
-      if (PT_deletedSettings.has(s.id)) return false;
-      // Also filter out backend-deactivated settings
-      if (s.is_active === false) {
-        PT_deletedSettings.add(s.id);
-        PT_saveDeletedSettings();
-        return false;
-      }
-      return true;
+      return !PT_deletedSettings.has(s.id);
     });
     if (!activeSettings.length) {
-      return; // All deleted or no settings — nothing to show
+      return; // All explicitly deleted — nothing to show
     }
     var newPortf = await Promise.all(activeSettings.map(async function(s) {
       // Get live positions for this trader
