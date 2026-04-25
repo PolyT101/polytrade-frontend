@@ -717,7 +717,7 @@ function renderPortfolio(){
         <button class="btn bsm" onclick="openPortfStats(${i})">📊 נתונים</button>
         
         <button class="btn bsm" onclick="openPD(${i})">עסקאות פתוחות${openCnt>0?' ('+openCnt+')':''}</button>
-        <button class="btn bsm" onclick="openPD(${i},true)">היסטוריה</button>
+        <button class="btn bsm" onclick="openPD(${i},true)">היסטוריה${(t.history&&t.history.length?'('+t.history.length+')':PT_allClosed(t).length?'('+PT_allClosed(t).length+')':'')}</button>
         ${t.active?`<button class="btn bsm ba" onclick="openCopyModal('${t.n}',${i})">עריכת הגדרות</button>`:''}
         ${t.active
           ?`<button class="btn bsm br_" onclick="stopCopy(${i})">עצור קופי</button>`
@@ -783,6 +783,7 @@ function updACC(){var e=document.getElementById('acnt');if(e)e.textContent=PORTF
 
 // ── PORTFOLIO DETAIL (עסקאות פתוחות) ──
 function openPD(i,hist){
+  _openPDIdx=i; _openPDHist=!!hist;
   var t=PORTF[i];
   if(!t.openPos) t.openPos=[];
   var openPos=t.openPos.filter(function(p){return !p.sold;});
@@ -811,16 +812,20 @@ function openPD(i,hist){
       else agoStr=Math.round(mins/1440)+'י׳';
     }
     // URLs and values
-    // Build polymarket URL from slug or conditionId
+    // Build polymarket URL: prefer cached event slug, then conditionId search
     var pmUrl='https://polymarket.com';
-    if(p.slug && p.slug.length>5) {
+    var cachedSlug = PT_slugCache[p.slug||''] || PT_slugCache[p.conditionId||''] || '';
+    if(cachedSlug) {
+      pmUrl='https://polymarket.com/event/'+cachedSlug;
+    } else if(p.slug && p.slug.startsWith('0x')) {
+      // conditionId — search by it
+      pmUrl='https://polymarket.com/markets?conditionId='+p.slug;
+    } else if(p.slug && p.slug.length>5) {
       pmUrl='https://polymarket.com/event/'+p.slug;
-    } else if(p.marketSlug) {
-      pmUrl='https://polymarket.com/event/'+p.marketSlug;
     }
     var safeUrl=pmUrl.replace(/'/g,'%27');
-    var entryC=Math.round((p.entry||0)*100);
-    var curC=Math.round((p.cur||0)*100);
+    var entryC=((p.entry||0)*100).toFixed(1).replace(/\.0$/,"");
+    var curC=((p.cur||0)*100).toFixed(1).replace(/\.0$/,"");
     // Use our configured amount, not Poligarch's position size
     var cost=parseFloat(p.ourCost||p.size||p.amount||0);
     var pnlAbs=parseFloat(p.pnl||0);
@@ -900,7 +905,8 @@ async function soldPos(portfIdx,posId,rowIdx){
   notif((isWin?'✅ זכיה +$':'❌ הפסד -$')+Math.abs(pnl).toFixed(2));
   openPD(portfIdx,false);
   renderPortfolio();
-  setTimeout(function(){PT_calcPeriodPnl(portfIdx);PT_updateDemoWallets();PT_loadCopyData();},800);
+  _openPDIdx=portfIdx; _openPDHist=true; // will show history after reload
+  setTimeout(function(){PT_loadCopyData();},1500); // give backend time to process
 }
 function sellAllPos(portfIdx){
   showConfirm('מכירת כל הפוזיציות','האם אתה בטוח שאתה רוצה למכור את כל הפוזיציות הפתוחות?',()=>{
@@ -2288,7 +2294,11 @@ async function PT_loadCopyData() {
       setTimeout(function(){
         PT_updateAllPeriods();
         PT_updateDemoWallets();
-        PT_startRealtime(); // refresh prices for new positions
+        PT_startRealtime();
+        // Refresh detail panel if it was open
+        if(_openPDIdx>=0 && _openPDIdx<PORTF.length){
+          openPD(_openPDIdx, _openPDHist);
+        }
       }, 500);
     }
 
@@ -2404,6 +2414,8 @@ async function PT_stopCopy(settingId) {
 
 // ── Poll for new copy trades every 30 sec ─────────────────────────
 var _copyPollInterval = null;
+var _openPDIdx = -1;     // which PORTF detail panel is currently open
+var _openPDHist = false; // whether history tab is showing
 function PT_startCopyPolling() {
   if (_copyPollInterval) clearInterval(_copyPollInterval);
   // Poll every 15 seconds for real-time feel
@@ -2420,6 +2432,8 @@ function PT_startCopyPolling() {
 var PT_priceCache = {};
 var _rtInterval = null;
 
+var PT_slugCache = {}; // conditionId → polymarket event slug
+
 async function PT_fetchMarketPrice(conditionId) {
   try {
     var r = await fetch('https://gamma-api.polymarket.com/markets?conditionId=' + conditionId);
@@ -2428,6 +2442,9 @@ async function PT_fetchMarketPrice(conditionId) {
     var markets = Array.isArray(data) ? data : (data.markets || []);
     if (!markets.length) return null;
     var m = markets[0];
+    // Cache the event slug for building Polymarket URLs
+    var evSlug = m.eventSlug || m.slug || '';
+    if (evSlug) PT_slugCache[conditionId] = evSlug;
     var op = m.outcomePrices;
     if (typeof op === 'string') { try { op = JSON.parse(op); } catch(e) { op = null; } }
     if (!op || !op.length) return null;
@@ -2480,7 +2497,7 @@ async function PT_refreshAllPrices() {
       var curEl = document.getElementById('cur_'+pi+'_'+j);
       var pnlEl = document.getElementById('pnl_'+pi+'_'+j);
       var ppEl  = document.getElementById('pp_'+pi+'_'+j);
-      if (curEl) curEl.textContent = Math.round(newCur*100) + '¢';
+      if (curEl) curEl.textContent = (newCur*100).toFixed(1).replace(/\.0$/,'') + '¢';
       if (pnlEl) {
         pnlEl.className = newPnl >= 0 ? 'pp' : 'pn_';
         pnlEl.textContent = (newPnl>=0?'+':'')+newPnl.toFixed(2)+'$ ('+(newPp>=0?'+':'')+newPp.toFixed(1)+'%)';
