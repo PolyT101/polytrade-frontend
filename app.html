@@ -1831,6 +1831,8 @@ go = function(id, btn) {
 };
 
 // ── Auth system ───────────────────────────────────────────────────
+var BACKEND = 'https://polytrade-backend-production.up.railway.app';
+var PT_GAMMA = 'https://gamma-api.polymarket.com';
 var PT_tok = null, PT_uid = null;
 try { PT_tok=localStorage.getItem('pt_tok'); PT_uid=localStorage.getItem('pt_uid'); } catch(e) {}
 
