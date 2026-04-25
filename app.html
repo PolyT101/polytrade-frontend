@@ -1438,16 +1438,20 @@ async function PT_loadTraders(offset) {
     var data = null;
     // Backend proxy is needed — direct Polymarket blocks CORS from Netlify
     var sources = [
-      'https://polytrade-backend-production.up.railway.app/api/pm/leaderboard?limit=100&offset='+offset,
-      'https://polytrade-backend-production.up.railway.app/api/traders?limit=50&offset='+offset,
-      'https://data-api.polymarket.com/leaderboard?limit=100&offset='+offset+'&order=pnl&ascending=false',
-      'https://data-api.polymarket.com/activity?limit=200',
+      'https://polytrade-backend-production.up.railway.app/api/traders?limit=500&offset='+offset+'&period=all&order=pnl',
+      'https://polytrade-backend-production.up.railway.app/api/pm/leaderboard?limit=500&offset='+offset+'&period=all&order=pnl',
     ];
     for (var _si=0; _si<sources.length; _si++) {
       try {
         var _d = await PT_fetch(sources[_si]);
         if (_d) {
           var _arr = Array.isArray(_d) ? _d : (_d.traders||_d.data||_d.profiles||_d.leaderboard||[]);
+          // normalize field names from v1/leaderboard
+          _arr = _arr.map(function(t){ return Object.assign({}, t, {
+            name:    t.name    || t.userName || t.pseudonym || '',
+            volume:  t.volume  || t.vol      || 0,
+            address: t.address || t.proxyWallet || '',
+          }); });
           if (_arr.length > 0) { data = _arr; break; }
         }
       } catch(e) { continue; }
