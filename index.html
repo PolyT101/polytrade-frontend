@@ -588,7 +588,13 @@ async function PT_loadTraderProfileData(addr, t) {
     // Update header
     var ri = document.getElementById('proi');
     if (ri) { ri.textContent=(pnl>=0?'+':'')+fU(pnl); ri.style.color=pnl>=0?'var(--G)':'var(--R)'; }
-    document.getElementById('pname').textContent = name;
+    // Show copy name (e.g. @Poligarch) as primary, Polymarket name as subtitle
+    var displayName = t.n && t.n !== '??' ? t.n : name;
+    document.getElementById('pname').textContent = displayName;
+    if(name && name !== displayName){
+      var pa=document.getElementById('paddr');
+      if(pa) pa.textContent = name + ' · ' + trA(addr);
+    }
 
     // Update About section
     var ab = document.getElementById('pabout');
@@ -793,7 +799,8 @@ function openProfileByAddr(addr, name){
   var tempT={id:9999,n:name||addr.slice(0,8),addr:addr,address:addr,
     roi:0,pnl:0,vol:0,win:0,trades:0,c:'#4da6ff',s:'Trader',
     tc:[],bt:0,wt:0,ah:1,wc:0,lc:0,
-    profileUrl:'https://polymarket.com/profile/'+addr};
+    profileUrl:'https://polymarket.com/profile/'+addr,
+    x_username:''};
   if(!ALL_T.find(function(x){return x.addr===addr;})) ALL_T.push(tempT);
   curT=tempT;isW=false;
   var av=document.getElementById('pavt');if(av){av.style.background='#4da6ff33';av.style.color='#4da6ff';av.textContent=(name||'??').slice(0,2).toUpperCase();}
@@ -1245,7 +1252,32 @@ function getCS(){
     budget:parseFloat(document.getElementById('cmbl')?.value)||1000
   };
 }
-function confirmDemo(){var bal=parseFloat(document.getElementById('demobal').value)||1000;var s=getCS();pndW=null;hideMo('demom');closeCopy();PORTF.unshift({n:pndT||'?',roi:0,days:0,inv:fU(bal)+' (דמו)',pnl:0,active:true,demo:true,openPos:[],walletId:null,settings:s});renderPortfolio();updACC();notif('קופי דמו הופעל! '+fU(bal));go('portfolio',document.querySelector('.ni[data-pg="portfolio"]'));}
+async function confirmDemo(){
+  var bal=parseFloat(document.getElementById('demobal').value)||1000;
+  var s=getCS();
+  var name=pndT||'?';
+  var traderAddr=curT&&curT.addr?curT.addr:'';
+  pndW=null;hideMo('demom');closeCopy();
+
+  if(!traderAddr){
+    notif('לא נמצאה כתובת טריידר','var(--R)');return;
+  }
+  if(!PT_tok||!PT_uid){
+    notif('התחבר תחילה','var(--R)');return;
+  }
+
+  // Save to backend — same as real copy, just with demo flag
+  s.demo=true;
+  var saved=await PT_startCopy(traderAddr, name, s, bal);
+  if(saved){
+    // Update budget on the newly created PORTF entry
+    if(PORTF.length>0&&PORTF[0].settingId&&!PORTF[0].budget){
+      PORTF[0].budget=bal;
+      PT_saveState();
+    }
+    go('portfolio',document.querySelector('.ni[data-pg="portfolio"]'));
+  }
+}
 async function confirmReal(){
   var s=getCS();
   if(!s.amount||s.amount<=0){notif('הכנס סכום','var(--R)');return;}
@@ -1624,7 +1656,7 @@ async function PT_loadTraders(offset) {
           wc: Math.round((t.trades_count||0)*0.6),
           lc: Math.round((t.trades_count||0)*0.4),
           addr: t.address,
-          profileUrl: 'https://polymarket.com/profile/'+t.address,
+          profileUrl: 'https://polymarket.com/profile/'+t.address,  // correct PM URL
           openPositions: []
         };
       });
@@ -2365,7 +2397,7 @@ async function PT_loadCopyData() {
 }
 
 // ── Start copy for a trader ───────────────────────────────────────
-async function PT_startCopy(traderAddr, traderName, settings) {
+async function PT_startCopy(traderAddr, traderName, settings, demoBudget) {
   if (!PT_tok || !PT_uid) {
     notif('התחבר תחילה כדי להפעיל קופי', 'var(--R)');
     return false;
@@ -2416,7 +2448,7 @@ async function PT_startCopy(traderAddr, traderName, settings) {
         openPos:[], // will be populated by PT_loadCopyData from DB
         traderAddr:traderAddr,
         settingId:d.id,
-        budget: budget,
+        budget: demoBudget || budget,
         spent: 0,
         settings:settings
       });
