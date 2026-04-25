@@ -684,7 +684,7 @@ function renderPortfolio(){
       <div class="wh">
         <div>
           <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
-            <div class="wn" onclick="openPByN('${t.n}')" style="cursor:pointer">${t.n}</div>
+            <div class="wn" onclick="openProfileByAddr('${t.traderAddr}','${t.n}')" style="cursor:pointer">${t.n} ↗</div>
             <span style="background:${t.active?'var(--Gb)':'rgba(255,69,96,.12)'};color:${t.active?'var(--G)':'var(--R)'};font-size:8px;padding:2px 6px;border-radius:99px;border:1px solid ${t.active?'var(--G)':'var(--R)'}">${t.active?'פעיל':'מושהה'}</span>
             ${t.demo?'<span class="demobg">דמו</span>':''}
             ${!t.active&&openCnt>0?`<span style="background:rgba(245,162,0,.15);color:var(--A);font-size:8px;padding:2px 6px;border-radius:99px;border:1px solid var(--A)">${openCnt} פוזיציות פתוחות</span>`:''}
@@ -780,7 +780,33 @@ async function delCopy(i){
   });
 }
 
-function openPByN(name){var t=ALL_T.find(x=>x.n===name)||ALL_T[0];openProfile(t.id);}
+function openPByN(name){
+  var t=ALL_T.find(function(x){return x.n===name;});
+  if(t){openProfile(t.id);return;}
+  notif('טוען פרופיל...','var(--A)');
+}
+function openProfileByAddr(addr, name){
+  // Open profile page for a specific wallet address (from copy card)
+  var existing=ALL_T.find(function(x){return x.addr===addr||x.address===addr;});
+  if(existing){openProfile(existing.id);return;}
+  // Create temporary entry and open profile
+  var tempT={id:9999,n:name||addr.slice(0,8),addr:addr,address:addr,
+    roi:0,pnl:0,vol:0,win:0,trades:0,c:'#4da6ff',s:'Trader',
+    tc:[],bt:0,wt:0,ah:1,wc:0,lc:0,
+    profileUrl:'https://polymarket.com/profile/'+addr};
+  if(!ALL_T.find(function(x){return x.addr===addr;})) ALL_T.push(tempT);
+  curT=tempT;isW=false;
+  var av=document.getElementById('pavt');if(av){av.style.background='#4da6ff33';av.style.color='#4da6ff';av.textContent=(name||'??').slice(0,2).toUpperCase();}
+  var pn=document.getElementById('pname');if(pn)pn.textContent=name||addr.slice(0,12)+'...';
+  var pa=document.getElementById('paddr');if(pa)pa.textContent=trA(addr);
+  var ri=document.getElementById('proi');if(ri){ri.textContent='טוען...';ri.style.color='var(--tx3)';}
+  document.getElementById('pabout').innerHTML='<div style="color:var(--tx3);font-size:10px;padding:8px">טוען נתונים...</div>';
+  document.getElementById('pstats').innerHTML='<div style="color:var(--tx3);font-size:10px;padding:8px">טוען...</div>';
+  var wb=document.getElementById('wbtn');if(wb){wb.classList.remove('sv');wb.querySelector('svg').setAttribute('fill','none');}
+  var ni=document.querySelector('.ni.on');ppg=(ni&&ni.getAttribute('data-pg'))||'traders';
+  go('profile',null);
+  PT_loadTraderProfileData(addr, tempT);
+}
 function updACC(){var e=document.getElementById('acnt');if(e)e.textContent=PORTF.filter(p=>p.active).length;}
 
 // ── PORTFOLIO DETAIL (עסקאות פתוחות) ──
@@ -794,7 +820,7 @@ function openPD(i,hist){
   var pos=hist?closedPos:openPos;
   var s=t.settings||{};
   document.getElementById('pdcnt').innerHTML=`
-    <div style="font-size:12px;font-weight:600;color:var(--G);margin-bottom:7px;cursor:pointer" onclick="openPByN('${t.n}')">${t.n}${t.demo?' <span class="demobg">דמו</span>':''}</div>
+    <div style="font-size:12px;font-weight:600;color:var(--G);margin-bottom:7px;cursor:pointer" onclick="openProfileByAddr('${t.traderAddr}','${t.n}')">${t.n}${t.demo?' <span class="demobg">דמו</span>':''}</div>
     <div style="font-size:10px;color:var(--tx3);margin-bottom:9px;background:var(--bg3);border-radius:6px;padding:6px 9px;display:flex;gap:9px;flex-wrap:wrap">${s.mode?`<span>כניסה: ${s.mode==='pct'?s.amount+'%':fU(s.amount)}</span>`:''}${s.tp?`<span>TP: ${s.tp}%</span>`:''}${s.sl?`<span>SL: ${s.sl}%</span>`:''}${s.sellMode?`<span>מכירה: ${s.sellMode}</span>`:''}</div>
     <div class="sg" style="margin-bottom:9px"><div class="sb_"><div class="sl">ROI</div><div class="sv ${t.roi>=0?'g':'r'}">${fP(t.roi)}</div></div><div class="sb_"><div class="sl">רווח</div><div class="sv ${t.roi>=0?'g':'r'}">${fU(t.pnl)}</div></div><div class="sb_"><div class="sl">הושקע</div><div class="sv">${t.inv}</div></div><div class="sb_"><div class="sl">ימי קופי</div><div class="sv">${t.days}</div></div><div class="sb_"><div class="sl">כמות פוזיציות</div><div class="sv">${(t.openPos||[]).length}</div></div></div>
     <div class="atabs" style="margin-bottom:9px">
@@ -872,7 +898,7 @@ function openPD(i,hist){
 async function soldPos(portfIdx,posId,rowIdx){
   var t=PORTF[portfIdx];
   var posIdx=(t.openPos||[]).findIndex(function(x){return x.id===posId;});
-  if(posIdx===-1) posIdx=rowIdx;
+  if(posIdx===-1) posIdx=parseInt(rowIdx)||0;
   var p=(t.openPos||[])[posIdx];
   if(!p||p.sold) return;
 
@@ -883,37 +909,42 @@ async function soldPos(portfIdx,posId,rowIdx){
   var cost=parseFloat(p.ourCost||3);
   var entry=parseFloat(p.entry||0.5);
   var shares=entry>0?cost/entry:0;
-  var curVal=shares*curP;
+  var curVal=parseFloat((shares*curP).toFixed(4));
   var pnl=parseFloat((curVal-cost).toFixed(4));
   var pp=cost>0?parseFloat((pnl/cost*100).toFixed(1)):0;
   var isWin=pnl>=0;
 
-  // Update position locally (optimistic)
-  p.sold=true; p.pnl=pnl; p.pp=pp; p.cur=curP;
-  p.soldAt=new Date().toISOString();
+  // 1. Remove from openPos immediately
+  t.openPos.splice(posIdx, 1);
 
-  // Call backend to persist the close
-  if(p.id && PT_uid){
-    try{
-      await fetch(BACKEND+'/api/copy/history/close',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({trade_id:p.id, price_exit:parseFloat(curP.toFixed(4)),
-          pnl_usd:pnl, user_id:PT_uid})
-      });
-    }catch(e){console.warn('Close error:',e);}
-  }
+  // 2. Add to local history immediately (stays even after reload)
+  if(!t.history) t.history=[];
+  t.history.unshift({
+    id:p.id, q:p.q, side:side, ourCost:cost,
+    entry:entry, cur:curP, pnl:pnl, pp:pp, sold:true,
+    openedAt:p.openedAt||'', soldAt:new Date().toISOString()
+  });
 
-  notif((isWin?'✅ זכיה +$':'❌ הפסד -$')+Math.abs(pnl).toFixed(2));
-  openPD(portfIdx,false);
-  renderPortfolio();
-  _openPDIdx=portfIdx; _openPDHist=true;
-  // Immediate wallet/portfolio update (optimistic)
+  // 3. Update UI — STAY on open trades tab (don't redirect to history)
   PT_updateDemoWallets();
   renderPortfolio();
-  // Reload from backend after 2s (give time for DB to process close)
-  setTimeout(function(){PT_loadCopyData();}, 2000);
+  var onPdtl=document.getElementById('pg-pdtl')&&document.getElementById('pg-pdtl').classList.contains('on');
+  if(onPdtl) openPD(portfIdx, false); // stay on open trades
+
+  notif((isWin?'✅ +$':'❌ -$')+Math.abs(pnl).toFixed(2));
+
+  // 4. Call backend async (best-effort, don't block UI)
+  if(p.id&&PT_uid){
+    fetch(BACKEND+'/api/copy/history/close',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({trade_id:p.id, price_exit:parseFloat(curP.toFixed(4)),
+        pnl_usd:pnl, user_id:PT_uid})
+    }).catch(function(e){console.warn('Close error:',e);});
+  }
+  // Note: don't force reload — let 15s poll handle DB sync
 }
+
 function sellAllPos(portfIdx){
   showConfirm('מכירת כל הפוזיציות','האם אתה בטוח שאתה רוצה למכור את כל הפוזיציות הפתוחות?',()=>{
     (PORTF[portfIdx].openPos||[]).forEach(p=>p.sold=true);
@@ -2269,6 +2300,13 @@ async function PT_loadCopyData() {
       var existingEntry = PORTF.find(function(p){ return p.settingId === s.id; });
       var savedBudget = existingEntry ? existingEntry.budget : null;
 
+      // Merge DB history with locally-sold trades not yet in DB
+      var dbHistIds=new Set(historyPos.map(function(h){return h.id;}));
+      var localHistory=(existingEntry&&existingEntry.history)||[];
+      var localOnly=localHistory.filter(function(h){return h.id&&!dbHistIds.has(h.id);});
+      var mergedHistory=historyPos.concat(localOnly);
+      mergedHistory.sort(function(a,b){return new Date(b.soldAt||b.closedAt||0)-new Date(a.soldAt||a.closedAt||0);});
+
       return {
         n:          s.trader_name || ('@' + s.trader_address.slice(2,8)),
         roi:        parseFloat(totalPnl.toFixed(1)),
@@ -2278,11 +2316,11 @@ async function PT_loadCopyData() {
         active:     s.is_active,
         demo:       true,
         openPos:    openPos,
-        history:    historyPos,   // closed trades from DB
+        history:    mergedHistory,   // DB closed trades + local unsync'd sales
         traderAddr: s.trader_address,
         settingId:  s.id,
         copyTrades: myTrades,
-        budget:     savedBudget || 1000,  // default $1000 demo budget
+        budget:     savedBudget || 1000,
         settings:   {
           mode:     s.entry_mode === 'percent' ? 'pct' : 'fixed',
           amount:   s.entry_amount,
@@ -2516,6 +2554,8 @@ async function PT_refreshAllPrices() {
   });
 }
 
+  // Refresh wallet/portfolio cubes with updated prices
+  PT_updateDemoWallets();
 // Keep old function name for compatibility
 async function PT_updatePositionPrices() { await PT_refreshAllPrices(); }
 
