@@ -916,7 +916,7 @@ function openPortfStats(i){
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:11px">'+
     '<div><div style="font-size:13px;font-weight:600;color:var(--tx)">'+t.n+' '+(t.demo?'<span class="demobg">דמו</span>':'')+
     '</div><div style="font-size:9px;color:var(--tx3);margin-top:2px">'+(t.active?'פעיל':'מושהה')+' · '+t.days+' ימים</div></div>'+
-    '<button class="btn bsm" onclick="hideMo('pstm')">✕</button></div>'+
+    '<button class="btn bsm" onclick="hideMo(\'pstm\')">✕</button></div>'+
     '<div class="sg" style="margin-bottom:11px">'+
     '<div class="sb_"><div class="sl">ROI</div><div class="sv '+(t.roi>=0?'g':'r')+'">'+fP(t.roi)+'</div></div>'+
     '<div class="sb_"><div class="sl">P&L כולל</div><div class="sv '+(t.pnl>=0?'g':'r')+'">'+fU(t.pnl)+'</div></div>'+
@@ -931,10 +931,10 @@ function openPortfStats(i){
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'+
     '<span style="font-size:11px;font-weight:600;color:var(--tx)">עקומת רווח (עסקאות שלנו)</span>'+
     '<div style="display:flex;gap:4px" id="stchtabs">'+
-    '<button class="ctab on" onclick="swStCh('all',this,'+i+')">הכל</button>'+
-    '<button class="ctab" onclick="swStCh('month',this,'+i+')">חודשי</button>'+
-    '<button class="ctab" onclick="swStCh('week',this,'+i+')">שבועי</button>'+
-    '<button class="ctab" onclick="swStCh('day',this,'+i+')">יומי</button>'+
+    '<button class="ctab on" onclick="swStCh(\'all\',this,'+i+')">הכל</button>'+
+    '<button class="ctab" onclick="swStCh(\'month\',this,'+i+')">חודשי</button>'+
+    '<button class="ctab" onclick="swStCh(\'week\',this,'+i+')">שבועי</button>'+
+    '<button class="ctab" onclick="swStCh(\'day\',this,'+i+')">יומי</button>'+
     '</div></div>'+
     '<canvas id="stchc" height="100"></canvas></div>';
   showMo('pstm');
