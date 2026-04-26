@@ -2324,6 +2324,22 @@ async function PT_loadCopyData() {
       );
       var positions = posData && Array.isArray(posData) ? posData : [];
 
+      // Build price lookup from trader's live positions (Data API — known reliable)
+      // key = conditionId lowercase → {yes, no} prices
+      var posLookup = {};
+      positions.forEach(function(tp) {
+        var cid = (tp.conditionId || tp.market || '').toLowerCase();
+        if (!cid) return;
+        var oIdx = tp.outcomeIndex !== undefined ? parseInt(tp.outcomeIndex) : 0;
+        var p = parseFloat(tp.curPrice || 0);
+        if (!p) return;
+        if (!posLookup[cid]) posLookup[cid] = {};
+        if (oIdx === 0) { posLookup[cid].yes = p; if (!posLookup[cid].no) posLookup[cid].no = parseFloat((1 - p).toFixed(4)); }
+        else            { posLookup[cid].no  = p; if (!posLookup[cid].yes) posLookup[cid].yes = parseFloat((1 - p).toFixed(4)); }
+        // Populate PT_priceCache so PT_refreshAllPrices DOM updates also work
+        PT_priceCache[tp.conditionId || tp.market || cid] = Object.assign({ts: Date.now()}, posLookup[cid]);
+      });
+
       // Get copy trades for this setting (by setting_id when available)
       var myTrades = history.filter(function(t) {
         if (t.copy_settings_id != null) return t.copy_settings_id === s.id;
@@ -2347,9 +2363,10 @@ async function PT_loadCopyData() {
       var openPos = uniqueTrades.map(function(t) {
         var side = (t.side || 'YES').toUpperCase();
         var entryPrice = parseFloat(t.price_entry || 0.5);
-        // Use price cache if available, else fall back to entry price
-        var cached = PT_priceCache[t.market_id];
-        var curPrice = cached ? (side === 'YES' ? cached.yes : cached.no) : entryPrice;
+        // Price priority: 1) trader's live position (Data API), 2) Gamma cache, 3) entry price
+        var cidKey = (t.market_id || '').toLowerCase();
+        var livePrices = posLookup[cidKey] || PT_priceCache[t.market_id] || PT_priceCache[cidKey];
+        var curPrice = livePrices ? (side === 'YES' ? (livePrices.yes||entryPrice) : (livePrices.no||entryPrice)) : entryPrice;
         // shares = cost / entryPrice; curVal = shares * curPrice
         var shares = entryPrice > 0 ? entryAmt / entryPrice : 0;
         var curVal  = shares * curPrice;
@@ -2674,12 +2691,6 @@ async function PT_refreshAllPrices() {
       }
     });
   });
-
-  // If detail panel is open on open-positions tab, re-render so prices appear immediately
-  if (_openPDIdx >= 0 && !_openPDHist && _openPDIdx < PORTF.length) {
-    var tbody = document.getElementById('pos-body-' + _openPDIdx);
-    if (tbody) openPD(_openPDIdx, false);
-  }
 
   PT_updateDemoWallets();
 }
