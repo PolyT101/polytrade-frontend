@@ -1334,7 +1334,37 @@ async function confirmReal(){
   notif('קופי הופעל! '+name+' 🚀');
   go('portfolio',document.querySelector('.ni[data-pg="portfolio"]'));
 }
-function saveEdit(){if(editI==null)return;PORTF[editI].settings=getCS();pndW=null;closeCopy();PT_saveState();renderPortfolio();notif('הגדרות עודכנו!');}
+async function saveEdit(){
+  if(editI==null)return;
+  var s=getCS();
+  PORTF[editI].settings=s;
+  pndW=null;
+  closeCopy();
+  PT_saveState();
+  renderPortfolio();
+  notif('הגדרות עודכנו!');
+  var sid=PORTF[editI]&&PORTF[editI].settingId;
+  if(sid&&PT_tok&&PT_uid){
+    try{
+      await fetch('https://polytrade-backend-production.up.railway.app/api/copy/settings/'+sid+'?user_id='+encodeURIComponent(PT_uid),{
+        method:'PUT',
+        headers:{'Content-Type':'application/json','Authorization':'Bearer '+PT_tok},
+        body:JSON.stringify({
+          trader_address:    PORTF[editI].traderAddr||'',
+          trader_name:       PORTF[editI].n||'',
+          entry_mode:        s.mode==='pct'?'percent':'fixed',
+          entry_amount:      parseFloat(s.amount)||10,
+          take_profit_pct:   s.tp?parseFloat(s.tp):null,
+          stop_loss_pct:     s.sl?parseFloat(s.sl):null,
+          max_daily_trades:  s.maxTrades?parseInt(s.maxTrades):null,
+          max_daily_loss_usd:s.maxLoss?parseFloat(s.maxLoss):null,
+          sell_mode:         s.sellMode||'mirror',
+          is_active:         true
+        })
+      });
+    }catch(e){console.error('saveEdit backend err:',e);}
+  }
+}
 
 // ── ANALYST ──
 function swA(type,btn,keep){
@@ -2360,10 +2390,26 @@ async function PT_loadCopyData() {
           amount:   s.entry_amount,
           sl:       s.stop_loss_pct,
           tp:       s.take_profit_pct,
-          sellMode: s.sell_mode
+          sellMode:  s.sell_mode,
+          maxTrades: s.max_daily_trades || null,
+          maxLoss:   s.max_daily_loss || null
         }
       };
     }));
+
+    // Enrich display names with real Polymarket pseudonyms
+    var uniqueAddrs = [...new Set(newPortf.map(function(p){return p.traderAddr;}))];
+    var nameResults = await Promise.allSettled(uniqueAddrs.map(function(addr){
+      return PT_fetch('https://polytrade-backend-production.up.railway.app/api/traders/'+addr)
+        .then(function(d){ return {addr:addr, name:d&&d.name?d.name:null}; });
+    }));
+    var pmNameMap = {};
+    nameResults.forEach(function(r){
+      if(r.status==='fulfilled'&&r.value&&r.value.name) pmNameMap[r.value.addr]=r.value.name;
+    });
+    newPortf.forEach(function(p){
+      if(pmNameMap[p.traderAddr]) p.n = pmNameMap[p.traderAddr];
+    });
 
     if (newPortf.length > 0) {
       PORTF = newPortf;
@@ -2410,7 +2456,8 @@ async function PT_startCopy(traderAddr, traderName, settings, demoBudget) {
       entry_amount:       parseFloat(settings.amount) || 10,
       stop_loss_pct:      settings.sl ? parseFloat(settings.sl) : null,
       take_profit_pct:    settings.tp ? parseFloat(settings.tp) : null,
-      max_daily_loss_usd: settings.maxDaily ? parseFloat(settings.maxDaily) : null,
+      max_daily_trades:   settings.maxTrades ? parseInt(settings.maxTrades) : null,
+      max_daily_loss_usd: settings.maxLoss ? parseFloat(settings.maxLoss) : null,
       sell_mode:          settings.sellMode || 'mirror',
       is_active:          true,
     };
