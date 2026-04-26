@@ -2410,7 +2410,7 @@ async function PT_loadCopyData() {
       .then(function(r){return r.ok?r.json():null;})
       .then(function(data){
         var item=Array.isArray(data)&&data.length?data[0]:null;
-        var name=item&&(item.pseudonym||item.userName||item.name)||null;
+        var name=item&&(item.name||item.userName||item.pseudonym)||null;
         return{addr:addr,name:name};
       })
       .catch(function(){return{addr:addr,name:null};});
@@ -2641,10 +2641,15 @@ async function PT_refreshAllPrices() {
       }
     });
   });
-}
 
-  // Refresh wallet/portfolio cubes with updated prices
+  // If detail panel is open on open-positions tab, re-render so prices appear immediately
+  if (_openPDIdx >= 0 && !_openPDHist && _openPDIdx < PORTF.length) {
+    var tbody = document.getElementById('pos-body-' + _openPDIdx);
+    if (tbody) openPD(_openPDIdx, false);
+  }
+
   PT_updateDemoWallets();
+}
 // Keep old function name for compatibility
 async function PT_updatePositionPrices() { await PT_refreshAllPrices(); }
 
