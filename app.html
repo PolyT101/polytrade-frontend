@@ -727,6 +727,7 @@ function renderPortfolio(){
         <button class="btn bsm" onclick="openPD(${i})">עסקאות פתוחות${openCnt>0?' ('+openCnt+')':''}</button>
         <button class="btn bsm" onclick="openPD(${i},true)">היסטוריה${(t.history&&t.history.length?'('+t.history.length+')':PT_allClosed(t).length?'('+PT_allClosed(t).length+')':'')}</button>
         ${t.active?`<button class="btn bsm ba" onclick="openCopyModal('${t.n}',${i})">עריכת הגדרות</button>`:''}
+        ${t.settingId?`<button class="btn bsm" style="background:var(--bg3)!important" onclick="scanCopy(${i})" title="סרוק פעילות עכשיו">🔍 סרוק</button>`:''}
         ${t.active
           ?`<button class="btn bsm br_" onclick="stopCopy(${i})">עצור קופי</button>`
           :`<button class="btn bsm bgr" onclick="openResumeModal(${i})">חזור לקופי</button>`}
@@ -735,6 +736,38 @@ function renderPortfolio(){
     </div>`;
   }).join('');
   updACC();
+}
+async function scanCopy(i){
+  var t=PORTF[i];
+  if(!t||!t.settingId||!PT_uid) return;
+  notif('🔍 סורק פעילות...');
+  try{
+    var r=await fetch(BACKEND+'/api/copy/settings/'+t.settingId+'/scan?user_id='+encodeURIComponent(PT_uid),{
+      method:'POST', headers:{'Authorization':'Bearer '+PT_tok,'Content-Type':'application/json'}
+    });
+    var d=await r.json();
+    if(!r.ok){notif('שגיאה: '+(d.detail||'scan failed'),'var(--R)');return;}
+    var msg='';
+    if(d.activity_total===0){
+      msg='⚠️ לא נמצאה פעילות לכתובת זו! ודא שהכתובת היא ה-Proxy Wallet מ-Polymarket';
+      notif(msg,'var(--R)');
+    } else if(d.new_since_watermark===0){
+      msg='✅ '+d.activity_total+' פעילויות נמצאו — אין עסקאות חדשות מאז הסריקה האחרונה';
+      notif(msg);
+    } else {
+      msg='✅ עובד! נמצאו '+d.new_since_watermark+' עסקאות חדשות — מעבד...';
+      notif(msg);
+      setTimeout(PT_loadCopyData, 1500);
+    }
+    // Show sample of what the API returns
+    if(d.sample_fields&&d.sample_fields.length){
+      var sample=d.sample_fields[0];
+      console.log('[scan] sample trade fields:', sample);
+      if(!sample.conditionId){
+        notif('⚠️ שדה conditionId חסר בAPI! נמצאו: '+Object.keys(sample).join(', '),'var(--R)');
+      }
+    }
+  }catch(e){notif('שגיאת תקשורת','var(--R)');}
 }
 async function stopCopy(i){
   var t = PORTF[i];
@@ -959,14 +992,22 @@ function sellAllPos(portfIdx){
   showConfirm('מכירת כל הפוזיציות','האם אתה בטוח שאתה רוצה למכור את כל הפוזיציות הפתוחות?',()=>{
     var t=PORTF[portfIdx];
     var entryAmt=parseFloat((t.settings&&t.settings.amount)||10);
+    if(!t.history) t.history=[];
     (t.openPos||[]).filter(p=>!p.sold).forEach(p=>{
-      p.sold=true;
-      var cached=PT_priceCache[p.slug||'']||PT_priceCache[p.conditionId||''];
       var side=(p.side||'YES').toUpperCase();
+      var cached=PT_priceCache[p.slug||'']||PT_priceCache[p.conditionId||''];
       var curP=cached?(side==='YES'?cached.yes:cached.no):parseFloat(p.cur||p.entry||0.5);
       var cost=parseFloat(p.ourCost||entryAmt);
       var entry=parseFloat(p.entry||0.5);
       var pnl=entry>0?parseFloat((cost*((curP-entry)/entry)).toFixed(4)):0;
+      var pp=cost>0?parseFloat((pnl/cost*100).toFixed(1)):0;
+      p.sold=true;
+      // Add to history immediately so it shows even before DB sync
+      t.history.unshift({
+        id:p.id, q:p.q, side:side, ourCost:cost,
+        entry:entry, cur:curP, pnl:pnl, pp:pp, sold:true,
+        openedAt:p.openedAt||'', soldAt:new Date().toISOString()
+      });
       if(p.id&&PT_uid){
         fetch(BACKEND+'/api/copy/history/close',{
           method:'POST',
@@ -2536,7 +2577,18 @@ async function PT_startCopy(traderAddr, traderName, settings, demoBudget) {
     if (r.ok) {
       var d = await r.json();
       console.log('Copy setting saved:', d);
-      notif('✅ קופי הופעל! עוקב אחר ' + traderName + ' — מנוע פעיל כל 10 שניות');
+      // Verify address has activity — warn user immediately if address is wrong
+      try{
+        var actCheck=await fetch('https://data-api.polymarket.com/activity?user='+encodeURIComponent(traderAddr)+'&limit=5',{
+          headers:{'Accept':'application/json','Origin':'https://polymarket.com','Referer':'https://polymarket.com/'}
+        });
+        var actData=actCheck.ok?await actCheck.json():[];
+        if(!Array.isArray(actData)||actData.length===0){
+          notif('⚠️ הקופי נוצר אך לא נמצאה פעילות לכתובת זו! ודא שהכתובת היא ה-Proxy Wallet מ-Polymarket (לא ה-MetaMask שלך)','var(--A)');
+        } else {
+          notif('✅ קופי הופעל! נמצאו '+actData.length+' פעילויות — מנוע סורק כל 10 שניות');
+        }
+      }catch(e){ notif('✅ קופי הופעל! עוקב אחר '+traderName+' — מנוע פעיל כל 10 שניות'); }
 
       // Add to local PORTF immediately
       var posData = await PT_fetch('https://polytrade-backend-production.up.railway.app/api/copy/positions/' + traderAddr);
