@@ -2590,18 +2590,8 @@ async function PT_startCopy(traderAddr, traderName, settings, demoBudget) {
         }
       }catch(e){ notif('✅ קופי הופעל! עוקב אחר '+traderName+' — מנוע פעיל כל 10 שניות'); }
 
-      // Add to local PORTF immediately
-      var posData = await PT_fetch('https://polytrade-backend-production.up.railway.app/api/copy/positions/' + traderAddr);
-      var openPos = (posData && Array.isArray(posData)) ? posData.map(function(p) {
-        return {
-          q:p.title||p.market||'שאלה', side:(p.side||'YES').toUpperCase(),
-          entry:parseFloat(p.avgPrice||0), cur:parseFloat(p.curPrice||0),
-          pnl:parseFloat(p.cashPnl||0), pct:parseFloat(p.percentPnl||0),
-          size:parseFloat(p.currentValue||0), sold:false
-        };
-      }) : [];
-
-      var budget = parseFloat(settings.budget) || null; // null = no fixed budget
+      // Add to local PORTF immediately (openPos populated by PT_loadCopyData from DB)
+      var budget = parseFloat(settings.budget) || null;
       PORTF.unshift({
         n:traderName, roi:0, days:0,
         inv: settings.mode==='pct' ? settings.amount+'% מהתיק' : '$'+settings.amount,
