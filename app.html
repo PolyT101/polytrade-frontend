@@ -880,9 +880,10 @@ function openPD(i,hist){
         +'</td>';
     }
     // For open: real-time P&L cell (will be updated by polling)
+    var posKey=p.id||('pos_'+i+'_'+j);
     var pnlCell=hist?histResult:(
-      '<td id="cur_'+i+'_'+j+'">'+curC+'¢</td>'
-      +'<td id="pnl_'+i+'_'+j+'" class="'+(isWin?'pp':'pn_')+'">'
+      '<td id="cur_pos_'+posKey+'">'+curC+'¢</td>'
+      +'<td id="pnl_pos_'+posKey+'" class="'+(isWin?'pp':'pn_')+'">'
         +(isWin?'+':'')+pnlAbs.toFixed(2)+'$ ('+(isWin?'+':'')+ppVal.toFixed(1)+'%)'
       +'</td>'
     );
@@ -2339,13 +2340,16 @@ async function PT_loadCopyData() {
       });
       // History = our closed trades
       var historyPos = closedTrades.map(function(t){
+        var pnlVal = parseFloat(t.pnl || 0);
+        var pp = entryAmt > 0 ? parseFloat((pnlVal / entryAmt * 100).toFixed(1)) : 0;
         return {
           id:       t.id,
           q:        t.market || t.market_question || 'שאלה',
           side:     (t.side || 'YES').toUpperCase(),
           entry:    parseFloat(t.price_entry || 0),
           cur:      parseFloat(t.price_exit || t.price_entry || 0),
-          pnl:      parseFloat(t.pnl || 0),
+          pnl:      pnlVal,
+          pp:       pp,
           ourCost:  entryAmt,
           sold:     true,
           soldAt:   t.closed_at || t.opened_at,
@@ -2397,11 +2401,19 @@ async function PT_loadCopyData() {
       };
     }));
 
-    // Enrich display names with real Polymarket pseudonyms
+    // Enrich display names directly from Polymarket activity API (pseudonym field)
     var uniqueAddrs = [...new Set(newPortf.map(function(p){return p.traderAddr;}))];
     var nameResults = await Promise.allSettled(uniqueAddrs.map(function(addr){
-      return PT_fetch('https://polytrade-backend-production.up.railway.app/api/traders/'+addr)
-        .then(function(d){ return {addr:addr, name:d&&d.name?d.name:null}; });
+      return fetch('https://data-api.polymarket.com/activity?user='+addr+'&limit=1',{
+        headers:{'Accept':'application/json','Origin':'https://polymarket.com','Referer':'https://polymarket.com/'}
+      })
+      .then(function(r){return r.ok?r.json():null;})
+      .then(function(data){
+        var item=Array.isArray(data)&&data.length?data[0]:null;
+        var name=item&&(item.pseudonym||item.userName||item.name)||null;
+        return{addr:addr,name:name};
+      })
+      .catch(function(){return{addr:addr,name:null};});
     }));
     var pmNameMap = {};
     nameResults.forEach(function(r){
@@ -2618,18 +2630,14 @@ async function PT_refreshAllPrices() {
       pos.pnl = parseFloat(newPnl.toFixed(4));
       pos.pp  = parseFloat(newPp.toFixed(1));
 
-      // Update DOM if open trades list is visible
-      var curEl = document.getElementById('cur_'+pi+'_'+j);
-      var pnlEl = document.getElementById('pnl_'+pi+'_'+j);
-      var ppEl  = document.getElementById('pp_'+pi+'_'+j);
+      // Update DOM — use position id to avoid sort-order mismatch
+      var posKey = pos.id || ('pos_'+pi+'_'+j);
+      var curEl = document.getElementById('cur_pos_'+posKey);
+      var pnlEl = document.getElementById('pnl_pos_'+posKey);
       if (curEl) curEl.textContent = (newCur*100).toFixed(1).replace(/\.0$/,'') + '¢';
       if (pnlEl) {
         pnlEl.className = newPnl >= 0 ? 'pp' : 'pn_';
         pnlEl.textContent = (newPnl>=0?'+':'')+newPnl.toFixed(2)+'$ ('+(newPp>=0?'+':'')+newPp.toFixed(1)+'%)';
-      }
-      if (ppEl) {
-        ppEl.className = newPp >= 0 ? 'pp' : 'pn_';
-        ppEl.textContent = '(' + (newPp>=0?'+':'') + newPp.toFixed(1) + '%)';
       }
     });
   });
