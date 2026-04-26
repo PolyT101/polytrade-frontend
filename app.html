@@ -836,7 +836,7 @@ function openPD(i,hist){
     </div>
     ${!hist&&openPos.length>0&&!t.active?`<button class="btn br_" style="width:100%;margin-bottom:9px;font-size:10px" onclick="sellAllPos(${i})">מכור את כל הפוזיציות (${openPos.length})</button>`:''}
     <div style="background:var(--CB);border:1px solid var(--CBR);border-radius:8px;overflow:hidden;overflow-x:auto">
-      <table class="pt"><thead><tr><th>שאלה</th><th>כיוון</th><th>עלות $</th><th>כניסה</th>${!hist?'<th>עכשיו</th>':''}<th>${hist?'P&L':'P&L $(%)'}</th>${hist?'<th>רווח</th>':'<th>מכור</th>'}</tr></thead>
+      <table class="pt"><thead><tr><th>שאלה</th><th>כיוון</th><th>עלות $</th><th>כניסה</th>${hist?'<th>סגירה</th>':''}${!hist?'<th>עכשיו</th>':''}<th>${hist?'P&L':'P&L $(%)'}</th>${hist?'<th>רווח</th>':'<th>מכור</th>'}</tr></thead>
       <tbody id="pos-body-${i}">${(()=>{var sortedPos=[...pos].sort(function(a,b){return new Date(b.openedAt||0)-new Date(a.openedAt||0);});return sortedPos.length?sortedPos.map((p,j)=>{
     // Time ago
     var agoStr='';
@@ -860,7 +860,8 @@ function openPD(i,hist){
     }
     var safeUrl=pmUrl.replace(/'/g,'%27');
     var entryC=((p.entry||0)*100).toFixed(1).replace(/\.0$/,"");
-    var curC=((p.cur||0)*100).toFixed(1).replace(/\.0$/,"");
+    var exitC=((p.cur||0)*100).toFixed(1).replace(/\.0$/,"");
+    var curC=exitC;
     // Use our configured amount, not Poligarch's position size
     var cost=parseFloat(p.ourCost||p.size||p.amount||0);
     var pnlAbs=parseFloat(p.pnl||0);
@@ -895,6 +896,7 @@ function openPD(i,hist){
       +'<td><span class="badge '+(p.side==='YES'?'by':'bn')+'">'+p.side+'</span></td>'
       +'<td style="font-size:11px">'+costStr+'</td>'
       +'<td>'+entryC+'¢</td>'
+      +(hist?'<td>'+exitC+'¢</td>':'')
       +pnlCell
       +sellBtn
       +'</tr>';
@@ -955,8 +957,26 @@ async function soldPos(portfIdx,posId,rowIdx){
 
 function sellAllPos(portfIdx){
   showConfirm('מכירת כל הפוזיציות','האם אתה בטוח שאתה רוצה למכור את כל הפוזיציות הפתוחות?',()=>{
-    (PORTF[portfIdx].openPos||[]).forEach(p=>p.sold=true);
+    var t=PORTF[portfIdx];
+    var entryAmt=parseFloat((t.settings&&t.settings.amount)||10);
+    (t.openPos||[]).filter(p=>!p.sold).forEach(p=>{
+      p.sold=true;
+      var cached=PT_priceCache[p.slug||'']||PT_priceCache[p.conditionId||''];
+      var side=(p.side||'YES').toUpperCase();
+      var curP=cached?(side==='YES'?cached.yes:cached.no):parseFloat(p.cur||p.entry||0.5);
+      var cost=parseFloat(p.ourCost||entryAmt);
+      var entry=parseFloat(p.entry||0.5);
+      var pnl=entry>0?parseFloat((cost*((curP-entry)/entry)).toFixed(4)):0;
+      if(p.id&&PT_uid){
+        fetch(BACKEND+'/api/copy/history/close',{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({trade_id:p.id,price_exit:parseFloat(curP.toFixed(4)),pnl_usd:pnl,user_id:PT_uid})
+        }).catch(function(e){console.warn('Close error:',e);});
+      }
+    });
     notif('כל הפוזיציות נמכרו!');
+    PT_updateDemoWallets();
     openPD(portfIdx,false);
     renderPortfolio();
   });
@@ -1148,7 +1168,15 @@ function confirmResume(i){
 function openCopyModal(tn,pi){pndT=tn||'?';editI=(pi!=null)?pi:null;pndW=null;var s=editI!=null&&PORTF[editI]?PORTF[editI].settings:{};document.getElementById('copmb').innerHTML=buildCopyH(pndT,s||{},editI!=null);showMo('copm');updE();updS();}
 function closeCopy(){if(pndW){wallets=wallets.filter(w=>w.id!==pndW);pndW=null;}hideMo('copm');editI=null;}
 function buildCopyH(name,s,isE){
+  // Normalize sell mode: backend sends 'mirror'/'fixed'/'sell_all'/'manual'; form uses Hebrew
+  var smNorm=s.sellMode||'';
+  var smIsFixed=smNorm==='fixed'||smNorm==='סכום קבוע';
+  var smIsManual=smNorm==='manual'||smNorm==='ידני';
+  var smIsSellAll=smNorm==='sell_all'||smNorm==='מכור הכל';
+  var smIsMirror=!smNorm||smNorm==='mirror'||smNorm==='Mirror %';
+  var traderAddr=isE&&PORTF[editI]?PORTF[editI].traderAddr||'':'';
   var h=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:9px"><div style="font-size:12px;font-weight:600;color:var(--tx)">${isE?'עריכת הגדרות — ':'קופי מ-'}${name}</div><button class="btn bsm" onclick="closeCopy()">✕</button></div>`;
+  if(isE){h+=`<label class="ml">כתובת טריידר (לשינוי)</label><input class="mi" id="cmaddr" type="text" value="${traderAddr}" placeholder="0x..." style="font-family:monospace;font-size:10px"/>`;}
   h+=`<div class="cs">ארנק</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:7px" id="cmwg"><div class="mcard ${s.walletMode==='ארנק חדש'?'':'on'}" onclick="pkM('cmwg',this)"><div class="mci">★</div><div class="mcl">ברירת מחדל</div><div class="mcs">ארנק ראשי</div></div><div class="mcard ${s.walletMode==='ארנק חדש'?'on':''}" onclick="pkNW(this,'${name}')"><div class="mci">+</div><div class="mcl">ארנק חדש</div><div class="mcs">ייצור ייעודי</div></div></div>`;
   h+=`<div id="nwi" style="display:none;background:var(--Gb);border:1px solid var(--G);border-radius:6px;padding:7px;margin-bottom:7px;font-size:10px"><div style="color:var(--G);font-weight:600;margin-bottom:2px">ארנק נוצר!</div><div id="nwa" style="color:var(--tx2);font-family:monospace;font-size:9px"></div></div>`;
   h+=`<div class="cs">מצב כניסה</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:7px" id="cmmg"><div class="mcard ${s.mode==='pct'?'':'on'}" onclick="pkM('cmmg',this);updE()"><div class="mci">$</div><div class="mcl">סכום קבוע</div><div class="mcs">אותו $ לכל עסקה</div></div><div class="mcard ${s.mode==='pct'?'on':''}" onclick="pkM('cmmg',this);updE()"><div class="mci">%</div><div class="mcl">אחוז מהארנק</div><div class="mcs">% מהתיק</div></div></div>`;
@@ -1158,14 +1186,14 @@ function buildCopyH(name,s,isE){
   h+=`<label class="ml">מקסימום עסקאות יומי</label><input class="mi" id="cmmt" type="number" value="${s.maxTrades||''}" placeholder="ללא הגבלה"/>`;
   h+=`<label class="ml">מקסימום הפסד יומי $</label><input class="mi" id="cmml" type="number" value="${s.maxLoss||''}" placeholder="ללא הגבלה"/>`;
   h+=`<div class="cs">כשהטריידר מוכר</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:5px" id="cmsg">`;
-  h+=`<div class="mcard ${!s.sellMode||s.sellMode==='Mirror %'?'on':''}" onclick="pkM('cmsg',this);updS()"><div class="mci">↔</div><div class="mcl">Mirror %</div><div class="mcs">אותו % כמוהו</div></div>`;
-  if(isE){h+=`<div class="mcard ${s.sellMode==='מכור הכל'?'on':''}" onclick="showConfirm('מכירת כל הפוזיציות','האם אתה בטוח שאתה רוצה למכור את כל הפוזיציות?',function(){var c=document.querySelector('#cmsg .mcard:nth-child(2)');if(c){pkM('cmsg',c);updS();}notif('כל הפוזיציות נמכרו!')})"><div class="mci">↓</div><div class="mcl">מכור הכל</div><div class="mcs">מכור כל הפוזיציות</div></div>`;}
+  h+=`<div class="mcard ${smIsMirror?'on':''}" onclick="pkM('cmsg',this);updS()"><div class="mci">↔</div><div class="mcl">Mirror %</div><div class="mcs">אותו % כמוהו</div></div>`;
+  if(isE){h+=`<div class="mcard ${smIsSellAll?'on':''}" onclick="showConfirm('מכירת כל הפוזיציות','האם אתה בטוח שאתה רוצה למכור את כל הפוזיציות?',function(){var c=document.querySelector('#cmsg .mcard:nth-child(2)');if(c){pkM('cmsg',c);updS();}notif('כל הפוזיציות נמכרו!')})"><div class="mci">↓</div><div class="mcl">מכור הכל</div><div class="mcs">מכור כל הפוזיציות</div></div>`;}
   else{h+=`<div class="mcard disabled"><div class="mci">↓</div><div class="mcl">מכור הכל</div><div class="mcs">רק בקופי פעיל</div></div>`;}
-  h+=`<div class="mcard ${s.sellMode==='סכום קבוע'?'on':''}" onclick="pkM('cmsg',this);updS()"><div class="mci">$</div><div class="mcl">סכום קבוע</div><div class="mcs">סכום מוגדר</div></div>`;
-  h+=`<div class="mcard ${s.sellMode==='ידני'?'on':''}" onclick="pkM('cmsg',this);updS()"><div class="mci">✋</div><div class="mcl">ידני</div><div class="mcs">ידנית מהפורטפוליו</div></div></div>`;
-  h+=`<div id="sfix" style="display:${s.sellMode==='סכום קבוע'?'block':'none'}"><div class="sp"><label class="ml" style="margin-top:0">סכום קבוע למכירה ($)</label><input class="mi" id="cmsf" type="number" value="${s.sellFixed||''}" placeholder="למשל 100"/></div></div>`;
-  h+=`<div id="sman" style="display:${s.sellMode==='ידני'?'block':'none'}"><div style="background:var(--bg4);border-radius:6px;padding:7px;margin-top:5px;font-size:10px;color:var(--tx3)">פוזיציות לא יימכרו אוטומטית</div></div>`;
-  h+=`<div id="smir" style="display:${!s.sellMode||s.sellMode==='Mirror %'?'block':'none'}"><div style="background:var(--bg4);border-radius:6px;padding:7px;margin-top:5px;font-size:10px;color:var(--tx3)">המערכת תמכור בהתאמה לאחוז הטריידר</div></div>`;
+  h+=`<div class="mcard ${smIsFixed?'on':''}" onclick="pkM('cmsg',this);updS()"><div class="mci">$</div><div class="mcl">סכום קבוע</div><div class="mcs">סכום מוגדר</div></div>`;
+  h+=`<div class="mcard ${smIsManual?'on':''}" onclick="pkM('cmsg',this);updS()"><div class="mci">✋</div><div class="mcl">ידני</div><div class="mcs">ידנית מהפורטפוליו</div></div></div>`;
+  h+=`<div id="sfix" style="display:${smIsFixed?'block':'none'}"><div class="sp"><label class="ml" style="margin-top:0">סכום קבוע למכירה ($)</label><input class="mi" id="cmsf" type="number" value="${s.sellFixed||''}" placeholder="למשל 100"/></div></div>`;
+  h+=`<div id="sman" style="display:${smIsManual?'block':'none'}"><div style="background:var(--bg4);border-radius:6px;padding:7px;margin-top:5px;font-size:10px;color:var(--tx3)">פוזיציות לא יימכרו אוטומטית</div></div>`;
+  h+=`<div id="smir" style="display:${smIsMirror?'block':'none'}"><div style="background:var(--bg4);border-radius:6px;padding:7px;margin-top:5px;font-size:10px;color:var(--tx3)">המערכת תמכור בהתאמה לאחוז הטריידר</div></div>`;
   h+=`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-top:11px"><button class="btn" onclick="closeCopy()">סגור</button>${isE?'<button class="btn bgr" onclick="saveEdit()">שמור שינויים</button><button class="btn bp" onclick="saveEdit()">שמור וסגור</button>':'<button class="btn" style="background:var(--bg3)!important" onclick="showMo(\'demom\')">קופי דמו</button><button class="btn bp" onclick="confirmReal()">ביצוע קופי</button>'}</div>`;
   return h;
 }
@@ -1345,6 +1373,9 @@ async function saveEdit(){
   renderPortfolio();
   notif('הגדרות עודכנו!');
   var sid=PORTF[editI]&&PORTF[editI].settingId;
+  var newAddr=(document.getElementById('cmaddr')?.value||'').trim();
+  var addrChanged=newAddr&&newAddr!==PORTF[editI].traderAddr;
+  if(addrChanged) PORTF[editI].traderAddr=newAddr;
   if(sid&&PT_tok&&PT_uid){
     try{
       await fetch('https://polytrade-backend-production.up.railway.app/api/copy/settings/'+sid+'?user_id='+encodeURIComponent(PT_uid),{
@@ -1360,9 +1391,11 @@ async function saveEdit(){
           max_daily_trades:  s.maxTrades?parseInt(s.maxTrades):null,
           max_daily_loss_usd:s.maxLoss?parseFloat(s.maxLoss):null,
           sell_mode:         s.sellMode||'mirror',
-          is_active:         true
+          is_active:         true,
+          reset_watermark:   addrChanged
         })
       });
+      if(addrChanged) notif('כתובת עודכנה + watermark אופס');
     }catch(e){console.error('saveEdit backend err:',e);}
   }
 }
