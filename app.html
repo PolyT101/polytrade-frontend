@@ -2534,10 +2534,7 @@ async function PT_loadCopyData() {
 
 // ── Start copy for a trader ───────────────────────────────────────
 async function PT_startCopy(traderAddr, traderName, settings, demoBudget) {
-  if (!PT_tok || !PT_uid) {
-    notif('התחבר תחילה כדי להפעיל קופי', 'var(--R)');
-    return false;
-  }
+  var uid = PT_uid || '1';
   try {
     var payload = {
       trader_address:     traderAddr,
@@ -2552,7 +2549,7 @@ async function PT_startCopy(traderAddr, traderName, settings, demoBudget) {
       is_active:          true,
     };
 
-    var r = await fetch('https://polytrade-backend-production.up.railway.app/api/copy/settings?user_id=' + encodeURIComponent(PT_uid), {
+    var r = await fetch('https://polytrade-backend-production.up.railway.app/api/copy/settings?user_id=' + encodeURIComponent(uid), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
