@@ -2249,9 +2249,11 @@ async function PT_detectBots() {
 
 
 // ── State persistence ─────────────────────────────────
+var PT_STATE_VER = '5'; // bump this to force-clear stale localStorage portfolio on next load
 function PT_saveState() {
   try {
     var state = {
+      ver: PT_STATE_VER,
       savedMarkets: saved ? [...saved] : [],
       darkMode: document.documentElement.classList.contains('dark'),
       portfolio: PORTF ? PORTF.map(function(p){
@@ -2259,7 +2261,7 @@ function PT_saveState() {
           n:p.n, roi:p.roi, days:p.days, inv:p.inv,
           pnl:p.pnl, active:p.active, demo:p.demo,
           traderAddr:p.traderAddr, settings:p.settings,
-          walletId:p.walletId
+          walletId:p.walletId, settingId:p.settingId
         };
       }) : []
     };
@@ -2272,13 +2274,17 @@ function PT_loadState() {
     var raw = localStorage.getItem('pt_state');
     if (!raw) return;
     var state = JSON.parse(raw);
+    // If version mismatch — clear stale portfolio, keep other prefs
+    if (state.ver !== PT_STATE_VER) {
+      state.portfolio = [];
+    }
     if (state.savedMarkets && Array.isArray(state.savedMarkets)) {
       state.savedMarkets.forEach(function(id) { saved.add(id); });
     }
     if (state.darkMode === false) {
       document.documentElement.classList.remove('dark');
     }
-    // Restore portfolio (copy settings)
+    // Restore portfolio (copy settings) — only used until PT_loadCopyData overwrites it
     if (state.portfolio && Array.isArray(state.portfolio) && state.portfolio.length) {
       PORTF = state.portfolio.map(function(p){
         return Object.assign({openPos:[]}, p);
@@ -2792,8 +2798,8 @@ async function PT_calcPeriodPnl(idx) {
     });
 
     var totalPnl  = filtered.reduce(function(s,tr){ return s+parseFloat(tr.pnl||0); }, 0);
-    var totalCost = filtered.reduce(function(s,tr){ return s+parseFloat(tr.amount||0); }, 0);
-    var roi       = totalCost > 0 ? (totalPnl/totalCost)*100 : 0;
+    var budget    = parseFloat(t.budget || 1000);
+    var roi       = (totalPnl / budget) * 100;
     var isWin     = totalPnl >= 0;
 
     roiEl.textContent = (roi>=0?'+':'') + roi.toFixed(1) + '%';
