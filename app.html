@@ -2289,36 +2289,10 @@ function PT_loadState() {
       PORTF = state.portfolio.map(function(p){
         return Object.assign({openPos:[]}, p);
       });
-      // Reload live positions for each copy in background
-      setTimeout(function(){
-        PORTF.forEach(function(p){
-          if(p.traderAddr) {
-            PT_fetch('https://polytrade-backend-production.up.railway.app/api/copy/positions/'+p.traderAddr)
-              .then(function(pos){
-                if(pos && Array.isArray(pos)) {
-                  p.openPos = pos.map(function(x){
-                    var oIdx = parseInt(x.outcomeIndex !== undefined ? x.outcomeIndex : -1);
-                    var positionSide = oIdx === 0 ? 'YES' : oIdx === 1 ? 'NO' :
-                                       ((x.side||x.outcome||'YES').toUpperCase()==='NO' ? 'NO' : 'YES');//fixed
-                    return {
-                      q:x.title||x.market||x['?title']||x.question||'שאלה',
-                      side: positionSide,
-                      entry:parseFloat(x.avgPrice||0),
-                      cur:parseFloat(x.curPrice||0),
-                      pnl:parseFloat(x.cashPnl||0),
-                      pp:parseFloat(x.percentPnl||0),
-                      size:parseFloat(x.currentValue||0),
-                      sold:false,
-                      slug:x.slug||x.conditionId||'',
-                      openedAt: x.startDate||new Date().toISOString()
-                    };
-                  });
-                  renderPortfolio();
-                }
-              }).catch(function(){});
-          }
-        });
-      }, 1500);
+      // NOTE: openPos is intentionally left empty here.
+      // PT_loadCopyData (called 300ms later) populates openPos from the DB copy trades,
+      // which is the authoritative source. Loading the trader's live Polymarket positions
+      // here would mix the trader's real account data with our demo copy trades.
     }
   } catch(e) { console.warn('loadState:', e); }
 }
@@ -2513,7 +2487,21 @@ async function PT_loadCopyData() {
       };
     }));
 
-    // Names come from DB (trader_name) — no external enrichment that could corrupt all entries
+    // Enrich names from Polymarket profiles — sequential so one fetch can't corrupt another entry
+    for (var _ei = 0; _ei < newPortf.length; _ei++) {
+      try {
+        var _addr = newPortf[_ei].traderAddr;
+        var _r = await fetch('https://data-api.polymarket.com/activity?user=' + _addr + '&limit=1', {
+          headers: {'Accept':'application/json','Origin':'https://polymarket.com','Referer':'https://polymarket.com/'}
+        });
+        if (_r.ok) {
+          var _d = await _r.json();
+          var _item = Array.isArray(_d) && _d.length ? _d[0] : null;
+          var _pmName = (_item && (_item.name || _item.userName || _item.pseudonym)) || null;
+          if (_pmName) newPortf[_ei].n = PT_traderDisplayName(_pmName, _addr);
+        }
+      } catch(e) {}
+    }
 
     // After successful DB load, purge any stale PT_deletedSettings IDs that no longer exist
     var liveIds = new Set(settingsRes.map(function(s){ return s.id; }));
