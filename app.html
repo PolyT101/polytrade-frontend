@@ -1980,8 +1980,12 @@ go = function(id, btn) {
 // ── Auth system ───────────────────────────────────────────────────
 var BACKEND = 'https://polytrade-backend-production.up.railway.app';
 var PT_GAMMA = 'https://gamma-api.polymarket.com';
-var PT_tok = null, PT_uid = null;
-try { PT_tok=localStorage.getItem('pt_tok'); PT_uid=localStorage.getItem('pt_uid'); } catch(e) {}
+var PT_tok = null, PT_uid = '1';
+try {
+  PT_tok = localStorage.getItem('pt_tok');
+  // Always use '1' — single-user demo system. Ignore any UUID from older sessions.
+  localStorage.setItem('pt_uid', '1');
+} catch(e) {}
 
 function PT_openAuth() {
   document.getElementById('pt-auth-mo').style.display = 'flex';
@@ -2018,8 +2022,8 @@ async function PT_doLogin() {
   notif('מתחבר...');
   var d = await PT_apiPost('/api/auth/login', {email:em, password:pw});
   if(d&&d.access_token) {
-    PT_tok=d.access_token; PT_uid=d.user_id||d.id||'1';
-    try{localStorage.setItem('pt_tok',PT_tok);localStorage.setItem('pt_uid',PT_uid);}catch(e){}
+    PT_tok=d.access_token; PT_uid='1';
+    try{localStorage.setItem('pt_tok',PT_tok);localStorage.setItem('pt_uid','1');}catch(e){}
     document.getElementById('pt-auth-mo').style.display='none';
     PT_afterAuth(); notif('ברוך הבא! 🎉');
   } else {
@@ -2042,8 +2046,8 @@ async function PT_doRegister() {
   notif('יוצר חשבון...');
   var d = await PT_apiPost('/api/auth/register', {username:nm, email:em, password:pw});
   if(d&&d.access_token) {
-    PT_tok=d.access_token; PT_uid=d.user_id||'1';
-    try{localStorage.setItem('pt_tok',PT_tok);localStorage.setItem('pt_uid',PT_uid);}catch(e){}
+    PT_tok=d.access_token; PT_uid='1';
+    try{localStorage.setItem('pt_tok',PT_tok);localStorage.setItem('pt_uid','1');}catch(e){}
     document.getElementById('pt-auth-mo').style.display='none';
     PT_afterAuth(); notif('חשבון נוצר! 🎉');
     // Show PK with any wallet field name
@@ -2327,20 +2331,11 @@ document.addEventListener('DOMContentLoaded', function PT_startup() {
 // ── Load real copy data from backend ─────────────────────────────
 async function PT_loadCopyData() {
   try {
-    // Try the stored PT_uid first; if no settings come back, fall back to "1"
-    var uid = PT_uid || '1';
+    var uid = '1';
     var settingsRes = await PT_fetch(
-      'https://polytrade-backend-production.up.railway.app/api/copy/settings?user_id=' + encodeURIComponent(uid)
+      'https://polytrade-backend-production.up.railway.app/api/copy/settings?user_id=1'
     );
-    if ((!settingsRes || !Array.isArray(settingsRes) || !settingsRes.length) && uid !== '1') {
-      uid = '1';
-      settingsRes = await PT_fetch(
-        'https://polytrade-backend-production.up.railway.app/api/copy/settings?user_id=1'
-      );
-    }
     if (!settingsRes || !Array.isArray(settingsRes) || !settingsRes.length) return;
-    // Sync PT_uid so all subsequent calls use the correct user
-    if (uid !== PT_uid) { PT_uid = uid; try { localStorage.setItem('pt_uid', uid); } catch(e){} }
 
     // Build PORTF from real settings + history
     // Show ALL settings (active or stopped) unless user explicitly deleted them
