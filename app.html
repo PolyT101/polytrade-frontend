@@ -2336,17 +2336,25 @@ document.addEventListener('DOMContentLoaded', function PT_startup() {
 
 // ── Load real copy data from backend ─────────────────────────────
 async function PT_loadCopyData() {
-  if (!PT_tok || !PT_uid) return;
   try {
-    // Load copy settings
+    // Try the stored PT_uid first; if no settings come back, fall back to "1"
+    var uid = PT_uid || '1';
     var settingsRes = await PT_fetch(
-      'https://polytrade-backend-production.up.railway.app/api/copy/settings?user_id=' + encodeURIComponent(PT_uid)
+      'https://polytrade-backend-production.up.railway.app/api/copy/settings?user_id=' + encodeURIComponent(uid)
     );
+    if ((!settingsRes || !Array.isArray(settingsRes) || !settingsRes.length) && uid !== '1') {
+      uid = '1';
+      settingsRes = await PT_fetch(
+        'https://polytrade-backend-production.up.railway.app/api/copy/settings?user_id=1'
+      );
+    }
     if (!settingsRes || !Array.isArray(settingsRes) || !settingsRes.length) return;
+    // Sync PT_uid so all subsequent calls use the correct user
+    if (uid !== PT_uid) { PT_uid = uid; try { localStorage.setItem('pt_uid', uid); } catch(e){} }
 
     // Load copy history (demo trades)
     var historyRes = await PT_fetch(
-      'https://polytrade-backend-production.up.railway.app/api/copy/history?user_id=' + encodeURIComponent(PT_uid) + '&limit=500'
+      'https://polytrade-backend-production.up.railway.app/api/copy/history?user_id=' + encodeURIComponent(uid) + '&limit=500'
     );
     var history = historyRes && Array.isArray(historyRes) ? historyRes : [];
 
