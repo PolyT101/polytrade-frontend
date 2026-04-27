@@ -1872,7 +1872,10 @@ async function PT_searchAddr(addr) {
     var knownT = PT_TOP_TRADERS.find(function(t){
       return t.addr.toLowerCase()===addr.toLowerCase();
     });
-    var name = knownT ? knownT.name : ('@'+addr.slice(2,8)+'...'+addr.slice(-4));
+    // Pull real Polymarket display name from activity data (same enrichment used in portfolio)
+    var actItem = activity.length > 0 ? activity[0] : null;
+    var pmName = (actItem && (actItem.name || actItem.userName || actItem.pseudonym)) || null;
+    var name = knownT ? knownT.name : (pmName ? PT_traderDisplayName(pmName, addr) : trA(addr));
 
     var trader = {
       id:999, n:name,
@@ -2339,12 +2342,6 @@ async function PT_loadCopyData() {
     // Sync PT_uid so all subsequent calls use the correct user
     if (uid !== PT_uid) { PT_uid = uid; try { localStorage.setItem('pt_uid', uid); } catch(e){} }
 
-    // Load copy history (demo trades)
-    var historyRes = await PT_fetch(
-      'https://polytrade-backend-production.up.railway.app/api/copy/history?user_id=' + encodeURIComponent(uid) + '&limit=500'
-    );
-    var history = historyRes && Array.isArray(historyRes) ? historyRes : [];
-
     // Build PORTF from real settings + history
     // Show ALL settings (active or stopped) unless user explicitly deleted them
     var activeSettings = settingsRes.filter(function(s) {
@@ -2354,11 +2351,13 @@ async function PT_loadCopyData() {
       return; // All explicitly deleted — nothing to show
     }
     var newPortf = await Promise.all(activeSettings.map(async function(s) {
-      // Get live positions for this trader
-      var posData = await PT_fetch(
-        'https://polytrade-backend-production.up.railway.app/api/copy/positions/' + s.trader_address
-      );
+      // Fetch history and positions per-setting to avoid a global limit cutting off high-frequency traders
+      var [posData, settingHistRes] = await Promise.all([
+        PT_fetch('https://polytrade-backend-production.up.railway.app/api/copy/positions/' + s.trader_address),
+        PT_fetch('https://polytrade-backend-production.up.railway.app/api/copy/history?user_id=' + encodeURIComponent(uid) + '&setting_id=' + s.id + '&limit=1000')
+      ]);
       var positions = posData && Array.isArray(posData) ? posData : [];
+      var myTrades  = settingHistRes && Array.isArray(settingHistRes) ? settingHistRes : [];
 
       // Build price lookup from trader's live positions (Data API — known reliable)
       // key = conditionId lowercase → {yes, no} prices
@@ -2374,12 +2373,6 @@ async function PT_loadCopyData() {
         else            { posLookup[cid].no  = p; if (!posLookup[cid].yes) posLookup[cid].yes = parseFloat((1 - p).toFixed(4)); }
         // Populate PT_priceCache so PT_refreshAllPrices DOM updates also work
         PT_priceCache[tp.conditionId || tp.market || cid] = Object.assign({ts: Date.now()}, posLookup[cid]);
-      });
-
-      // Get copy trades for this setting (by setting_id when available)
-      var myTrades = history.filter(function(t) {
-        if (t.copy_settings_id != null) return t.copy_settings_id === s.id;
-        return t.trader === s.trader_address; // fallback for old trades without setting_id
       });
 
       // OUR open copy trades (status='demo' = open, not yet closed)
@@ -2759,7 +2752,7 @@ async function PT_calcPeriodPnl(idx) {
   if (!roiEl || !pnlEl) return;
 
   try {
-    var url = 'https://polytrade-backend-production.up.railway.app/api/copy/history?user_id='+encodeURIComponent(PT_uid||'1')+'&limit=500';
+    var url = 'https://polytrade-backend-production.up.railway.app/api/copy/history?user_id='+encodeURIComponent(PT_uid||'1')+'&limit=1000'+(t.settingId?'&setting_id='+t.settingId:'');
     var trades = await PT_fetch(url);
     if (!trades || !Array.isArray(trades)) return;
 
