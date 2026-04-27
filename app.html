@@ -2613,15 +2613,19 @@ async function PT_startCopy(traderAddr, traderName, settings, demoBudget) {
 
 // ── Stop copy for a trader ────────────────────────────────────────
 async function PT_stopCopy(settingId) {
-  if (!PT_tok || !PT_uid) return;
+  var uid = PT_uid || '1';
   try {
-    var r = await fetch('https://polytrade-backend-production.up.railway.app/api/copy/settings/' + settingId + '?user_id=' + encodeURIComponent(PT_uid), {
+    var r = await fetch('https://polytrade-backend-production.up.railway.app/api/copy/settings/' + settingId + '?user_id=' + encodeURIComponent(uid), {
       method: 'DELETE',
-      headers: {'Authorization': 'Bearer ' + PT_tok}
+      headers: {'Authorization': 'Bearer ' + (PT_tok || '')}
     });
     if (r.ok) {
-      notif('קופי הופסק');
+      notif('קופי הופסק ונמחק');
+      PT_deletedSettings.delete(settingId);
+      PT_saveDeletedSettings();
       setTimeout(PT_loadCopyData, 500);
+    } else {
+      notif('שגיאה במחיקת קופי', 'var(--R)');
     }
   } catch(e) {
     console.error('PT_stopCopy error:', e);
