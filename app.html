@@ -2492,32 +2492,7 @@ async function PT_loadCopyData() {
       };
     }));
 
-    // Enrich display names directly from Polymarket activity API (pseudonym field)
-    var uniqueAddrs = [...new Set(newPortf.map(function(p){return p.traderAddr;}))];
-    var nameResults = await Promise.allSettled(uniqueAddrs.map(function(addr){
-      return fetch('https://data-api.polymarket.com/activity?user='+addr+'&limit=1',{
-        headers:{'Accept':'application/json','Origin':'https://polymarket.com','Referer':'https://polymarket.com/'}
-      })
-      .then(function(r){return r.ok?r.json():null;})
-      .then(function(data){
-        var item=Array.isArray(data)&&data.length?data[0]:null;
-        var name=item&&(item.name||item.userName||item.pseudonym)||null;
-        return{addr:addr,name:name};
-      })
-      .catch(function(){return{addr:addr,name:null};});
-    }));
-    var pmNameMap = {};
-    nameResults.forEach(function(r){
-      if(r.status==='fulfilled'&&r.value&&r.value.name){
-        var nm=r.value.name;
-        // Skip if the "name" is just a wallet address (0x...) or address+timestamp
-        var isAddr=/^0x[0-9a-fA-F]{10}/i.test(nm)||/^[0-9a-fA-F]{10,}-\d{10,}$/i.test(nm);
-        if(!isAddr) pmNameMap[r.value.addr]=nm;
-      }
-    });
-    newPortf.forEach(function(p){
-      if(pmNameMap[p.traderAddr]) p.n = pmNameMap[p.traderAddr];
-    });
+    // Names come from DB (trader_name) — no external enrichment that could corrupt all entries
 
     if (newPortf.length > 0) {
       PORTF = newPortf;
