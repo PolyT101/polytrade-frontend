@@ -2320,9 +2320,10 @@ document.addEventListener('DOMContentLoaded', function PT_startup() {
   PT_loadState();
   PT_updateBtn();
   PT_updateStatus();
+  // Always load copy data — it's public demo data (user_id='1' is hardcoded)
+  setTimeout(PT_loadCopyData, 300);
   if (PT_tok && PT_uid) {
     PT_loadDash();
-    setTimeout(PT_loadCopyData, 300);
   }
 });
 
@@ -2347,10 +2348,13 @@ async function PT_loadCopyData() {
     }
     var newPortf = await Promise.all(activeSettings.map(async function(s) {
       // Fetch history and positions per-setting to avoid a global limit cutting off high-frequency traders
-      var [posData, settingHistRes] = await Promise.all([
+      // allSettled so a single failed fetch never kills the whole portfolio load
+      var [posResult, histResult] = await Promise.allSettled([
         PT_fetch('https://polytrade-backend-production.up.railway.app/api/copy/positions/' + s.trader_address),
         PT_fetch('https://polytrade-backend-production.up.railway.app/api/copy/history?user_id=' + encodeURIComponent(uid) + '&setting_id=' + s.id + '&limit=1000')
       ]);
+      var posData       = posResult.status  === 'fulfilled' ? posResult.value  : null;
+      var settingHistRes = histResult.status === 'fulfilled' ? histResult.value : null;
       var positions = posData && Array.isArray(posData) ? posData : [];
       var myTrades  = settingHistRes && Array.isArray(settingHistRes) ? settingHistRes : [];
 
@@ -2362,7 +2366,7 @@ async function PT_loadCopyData() {
         if (!cid) return;
         var oIdx = tp.outcomeIndex !== undefined ? parseInt(tp.outcomeIndex) : 0;
         var p = parseFloat(tp.curPrice || 0);
-        if (!p) return;
+        if (isNaN(p) || p < 0) return;
         if (!posLookup[cid]) posLookup[cid] = {};
         if (oIdx === 0) { posLookup[cid].yes = p; if (!posLookup[cid].no) posLookup[cid].no = parseFloat((1 - p).toFixed(4)); }
         else            { posLookup[cid].no  = p; if (!posLookup[cid].yes) posLookup[cid].yes = parseFloat((1 - p).toFixed(4)); }
@@ -2511,16 +2515,6 @@ async function PT_loadCopyData() {
       }, 500);
     }
 
-    var demoCount = history.filter(function(t){ return t.status === 'demo'; }).length;
-    var newTrades = history.filter(function(t){
-      return t.status === 'demo' && 
-             new Date(t.opened_at) > new Date(Date.now() - 30000); // Last 30 sec
-    });
-    if (newTrades.length > 0) {
-      newTrades.forEach(function(t) {
-        notif('🤖 קופי דמו: ' + t.side + ' $' + t.amount + ' | ' + (t.market||'').slice(0,40));
-      });
-    }
 
   } catch(e) {
     console.warn('PT_loadCopyData error:', e);
