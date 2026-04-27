@@ -2509,6 +2509,11 @@ async function PT_loadCopyData() {
 
     // Names come from DB (trader_name) — no external enrichment that could corrupt all entries
 
+    // After successful DB load, purge any stale PT_deletedSettings IDs that no longer exist
+    var liveIds = new Set(settingsRes.map(function(s){ return s.id; }));
+    PT_deletedSettings = new Set([...PT_deletedSettings].filter(function(id){ return liveIds.has(id); }));
+    PT_saveDeletedSettings();
+
     if (newPortf.length > 0) {
       PORTF = newPortf;
       PT_saveState();
