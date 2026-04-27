@@ -412,6 +412,13 @@ var fC=n=>{var a=Math.abs(n);if(a>=1e6)return'$'+(n/1e6).toFixed(2)+'M';if(a>=10
 var fN=n=>Number(n).toLocaleString('he-IL'),fP=n=>(n>=0?'+':'')+parseFloat(n).toFixed(1)+'%';
 var mkA=()=>'0x'+Array.from({length:40},()=>'0123456789abcdef'[Math.floor(Math.random()*16)]).join('');
 var trA=a=>a.slice(0,8)+'...'+a.slice(-4);
+// Rule: if trader has no real name on Polymarket, display their wallet address (truncated)
+function PT_traderDisplayName(name, addr) {
+  if (!name) return trA(addr);
+  // name IS a wallet address (no real nickname set on Polymarket)
+  if (/^0x[0-9a-fA-F]{20,}/i.test(name)) return trA(addr);
+  return name;
+}
 var MNS=['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר'];
 var rJoin=i=>{var off=(i*37+11)%66,tm=9+off,y=2020+Math.floor(tm/12),m=tm%12;return MNS[m]+' '+y;};
 var C=['#00d47e','#4da6ff','#9b6dff','#f5a200','#ff4560'];
@@ -2475,7 +2482,7 @@ async function PT_loadCopyData() {
       mergedHistory.sort(function(a,b){return new Date(b.soldAt||b.closedAt||0)-new Date(a.soldAt||a.closedAt||0);});
 
       return {
-        n:          s.trader_name || ('@' + s.trader_address.slice(2,8)),
+        n:          PT_traderDisplayName(s.trader_name, s.trader_address),
         roi:        parseFloat(totalPnl.toFixed(1)),
         days:       Math.floor((Date.now() - new Date(s.created_at||Date.now()).getTime()) / 86400000),
         inv:        s.entry_mode === 'percent' ? s.entry_amount + '% מהתיק' : '$' + s.entry_amount,
