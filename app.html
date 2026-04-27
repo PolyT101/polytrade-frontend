@@ -2508,7 +2508,12 @@ async function PT_loadCopyData() {
     }));
     var pmNameMap = {};
     nameResults.forEach(function(r){
-      if(r.status==='fulfilled'&&r.value&&r.value.name) pmNameMap[r.value.addr]=r.value.name;
+      if(r.status==='fulfilled'&&r.value&&r.value.name){
+        var nm=r.value.name;
+        // Skip if the "name" is just a wallet address (0x...) or address+timestamp
+        var isAddr=/^0x[0-9a-fA-F]{10}/i.test(nm)||/^[0-9a-fA-F]{10,}-\d{10,}$/i.test(nm);
+        if(!isAddr) pmNameMap[r.value.addr]=nm;
+      }
     });
     newPortf.forEach(function(p){
       if(pmNameMap[p.traderAddr]) p.n = pmNameMap[p.traderAddr];
