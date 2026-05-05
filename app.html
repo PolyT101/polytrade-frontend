@@ -996,10 +996,12 @@ async function soldPos(portfIdx,posId,rowIdx){
 }
 
 function sellAllPos(portfIdx){
-  showConfirm('מכירת כל הפוזיציות','האם אתה בטוח שאתה רוצה למכור את כל הפוזיציות הפתוחות?',()=>{
+  showConfirm('מכירת כל הפוזיציות','האם אתה בטוח שאתה רוצה למכור את כל הפוזיציות הפתוחות?',async ()=>{
     var t=PORTF[portfIdx];
-    var entryAmt=parseFloat((t.settings&&t.settings.amount)||10);
+    if(!t) return;
+    // Optimistic UI: mark all open positions as sold immediately
     if(!t.history) t.history=[];
+    var entryAmt=parseFloat((t.settings&&t.settings.amount)||10);
     (t.openPos||[]).filter(p=>!p.sold).forEach(p=>{
       var side=(p.side||'YES').toUpperCase();
       var cached=PT_priceCache[p.slug||'']||PT_priceCache[p.conditionId||''];
@@ -1009,24 +1011,24 @@ function sellAllPos(portfIdx){
       var pnl=entry>0?parseFloat((cost*((curP-entry)/entry)).toFixed(4)):0;
       var pp=cost>0?parseFloat((pnl/cost*100).toFixed(1)):0;
       p.sold=true;
-      // Add to history immediately so it shows even before DB sync
       t.history.unshift({
         id:p.id, q:p.q, side:side, ourCost:cost,
         entry:entry, cur:curP, pnl:pnl, pp:pp, sold:true,
         openedAt:p.openedAt||'', soldAt:new Date().toISOString()
       });
-      if(p.id&&PT_uid){
-        fetch(BACKEND+'/api/copy/history/close',{
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({trade_id:p.id,price_exit:parseFloat(curP.toFixed(4)),pnl_usd:pnl,user_id:PT_uid})
-        }).catch(function(e){console.warn('Close error:',e);});
-      }
     });
     notif('כל הפוזיציות נמכרו!');
     PT_updateDemoWallets();
     openPD(portfIdx,false);
     renderPortfolio();
+    // Call backend sell-all endpoint (fetches live CLOB prices and closes in DB)
+    if(t.settingId && PT_uid){
+      try{
+        await fetch(BACKEND+'/api/copy/settings/'+t.settingId+'/sell-all?user_id='+encodeURIComponent(PT_uid),{
+          method:'POST',headers:{'Content-Type':'application/json'}
+        });
+      }catch(e){ console.warn('sell-all backend error:',e); }
+    }
   });
 }
 
