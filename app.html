@@ -867,14 +867,14 @@ function openPD(i,hist){
   var pos=hist?closedPos:openPos;
   var s=t.settings||{};
   document.getElementById('pdcnt').innerHTML=`
-    <div style="font-size:12px;font-weight:600;color:var(--G);margin-bottom:7px;cursor:pointer" onclick="openProfileByAddr('${t.traderAddr}','${t.n}')">${t.n}${t.demo?' <span class="demobg">דמו</span>':''}</div>
+    <div style="font-size:12px;font-weight:600;color:var(--G);margin-bottom:7px;cursor:pointer" onclick="openProfileByAddr('${t.traderAddr}','${t.n}')">${t.n}${t.demo?' <span class="demobg">דמו</span>':''}${openPos.some(p=>p.isReal)?'<span style="background:var(--G);color:#000;font-size:8px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:5px">LIVE</span>':''}</div>
     <div style="font-size:10px;color:var(--tx3);margin-bottom:9px;background:var(--bg3);border-radius:6px;padding:6px 9px;display:flex;gap:9px;flex-wrap:wrap">${s.mode?`<span>כניסה: ${s.mode==='pct'?s.amount+'%':fU(s.amount)}</span>`:''}${s.tp?`<span>TP: ${s.tp}%</span>`:''}${s.sl?`<span>SL: ${s.sl}%</span>`:''}${s.sellMode?`<span>מכירה: ${s.sellMode}</span>`:''}</div>
     <div class="sg" style="margin-bottom:9px"><div class="sb_"><div class="sl">ROI</div><div class="sv ${t.roi>=0?'g':'r'}">${fP(t.roi)}</div></div><div class="sb_"><div class="sl">רווח</div><div class="sv ${t.roi>=0?'g':'r'}">${fU(t.pnl)}</div></div><div class="sb_"><div class="sl">הושקע</div><div class="sv">${t.inv}</div></div><div class="sb_"><div class="sl">ימי קופי</div><div class="sv">${t.days}</div></div><div class="sb_"><div class="sl">כמות פוזיציות</div><div class="sv">${(t.openPos||[]).length}</div></div></div>
     <div class="atabs" style="margin-bottom:9px">
       <button class="atab ${hist?'':'on'}" onclick="openPD(${i},false)">פתוחות (${openPos.length})</button>
       <button class="atab ${hist?'on':''}" onclick="openPD(${i},true)">היסטוריה (${closedPos.length})</button>
     </div>
-    ${!hist&&openPos.length>0&&!t.active?`<button class="btn br_" style="width:100%;margin-bottom:9px;font-size:10px" onclick="sellAllPos(${i})">מכור את כל הפוזיציות (${openPos.length})</button>`:''}
+    ${!hist&&openPos.length>0?`<button class="btn br_" style="width:100%;margin-bottom:9px;font-size:10px" onclick="sellAllPos(${i})">מכור את כל הפוזיציות (${openPos.length})${openPos.some(p=>p.isReal)?' 🔴 LIVE':''}</button>`:''}
     <div style="background:var(--CB);border:1px solid var(--CBR);border-radius:8px;overflow:hidden;overflow-x:auto">
       <table class="pt"><thead><tr><th>שאלה</th><th>כיוון</th><th>עלות $</th><th>כניסה</th>${hist?'<th>סגירה</th>':''}${!hist?'<th>עכשיו</th>':''}<th>${hist?'P&L':'P&L $(%)'}</th>${hist?'<th>רווח</th>':'<th>מכור</th>'}</tr></thead>
       <tbody id="pos-body-${i}">${(()=>{var sortedPos=[...pos].sort(function(a,b){return new Date(b.openedAt||0)-new Date(a.openedAt||0);});return sortedPos.length?sortedPos.map((p,j)=>{
@@ -931,9 +931,10 @@ function openPD(i,hist){
     var titleHtml='<span class="pq" style="cursor:pointer" onclick="PT_pmOpen(this.dataset.url)" data-url="'+safeUrl+'" title="פתח בפולימארקט">'+p.q+' ↗</span>'
       +(agoStr?'<br><span style="font-size:9px;color:var(--tx3)">לפני '+agoStr+'</span>':'');
     var sellBtn=hist?'':('<td><button class="ts_" onclick="soldPos('+i+','+JSON.stringify(p.id||j)+','+j+')" '+(p.sold?'disabled':'')+' style="'+(p.sold?'opacity:.4':'')+'">מכור</button></td>');
+    var liveBadge = (!hist && p.isReal) ? '<span style="background:var(--G);color:#000;font-size:8px;font-weight:700;padding:1px 5px;border-radius:4px;margin-left:4px;vertical-align:middle">LIVE</span>' : '';
     return '<tr id="pdr_'+i+'_'+j+'">'
       +'<td>'+titleHtml+'</td>'
-      +'<td><span class="badge '+(p.side==='YES'?'by':'bn')+'">'+p.side+'</span></td>'
+      +'<td><span class="badge '+(p.side==='YES'?'by':'bn')+'">'+p.side+'</span>'+liveBadge+'</td>'
       +'<td style="font-size:11px">'+costStr+'</td>'
       +'<td>'+entryC+'¢</td>'
       +(hist?'<td>'+exitC+'¢</td>':'')
@@ -2413,6 +2414,8 @@ async function PT_loadCopyData() {
           ourCost:  entryAmt,
           size:     entryAmt,
           sold:     false,
+          isReal:   t.is_real || false,
+          clobOrderId: t.clob_order_id || null,
           openedAt: t.opened_at || new Date().toISOString(),
           slug:     t.market_id || '',
           txHash:   t.tx_hash || ''
