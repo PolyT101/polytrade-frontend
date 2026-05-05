@@ -516,13 +516,53 @@ function onSrch(v){if(document.getElementById('pg-traders').classList.contains('
 
 // ── DASHBOARD ──
 function updateTFA(){document.getElementById('tfabdg').className=tfaOn?'son':'soff';document.getElementById('tfabdg').textContent=tfaOn?'פעיל':'כבוי';document.getElementById('tfabtn').textContent=tfaOn?'נהל':'הפעל';document.getElementById('tfalbl').textContent=tfaOn?'(נדרש)':'(לא נדרש)';document.getElementById('tfalbl').style.color=tfaOn?'var(--G)':'var(--tx3)';var inp=document.getElementById('wtfa');inp.disabled=!tfaOn;inp.style.opacity=tfaOn?'1':'.4';}
+function _pmApprovalBtn(w){
+  if(w.pmStatus==='ready') return '<span style="font-size:9px;color:var(--G);font-weight:600;display:flex;align-items:center;gap:2px">✓ מאושר לטריידינג</span>';
+  if(w.pmStatus==='loading') return '<button class="btn bsm" disabled style="opacity:.6">⏳ מאשר...</button>';
+  if(w.pmStatus==='approving') return '<button class="btn bsm" disabled style="opacity:.6;background:var(--A)22;color:var(--A)">⛓ מבצע אישורים...</button>';
+  // null or 'unknown' — show check/approve button
+  return `<button class="btn bsm" style="background:var(--A)22;color:var(--A);border-color:var(--A)44" onclick="pmCheckAndApprove(${w.id})">🔑 אשר ל-Polymarket</button>`;
+}
 function renderDash(){
-  document.getElementById('wlist').innerHTML=wallets.map(w=>`<div class="wc"><div class="wh"><div><div style="display:flex;align-items:center;gap:5px"><div class="wn" ondblclick="openRn(${w.id})">${w.label}</div>${w.def?'<span class="dbg">ברירת מחדל</span>':''}</div><div class="wa" title="${w.addr}">${trA(w.addr)}</div></div><div style="text-align:left"><div class="wb">${fU(w.bal)}</div><div class="wbl">USDC · ${w.matic} MATIC</div></div></div><div style="display:flex;gap:4px;flex-wrap:wrap"><button class="btn bsm" onclick="copyA(${w.id})">העתק כתובת</button><button class="btn bsm" onclick="notif('שלח USDC (Polygon) לכתובת')">הפקד</button><button class="btn bsm" onclick="openRn(${w.id})">שנה שם</button>${w.bal===0&&!w.def?'<button class="btn bsm br_" onclick="wallets=wallets.filter(x=>x.id!=='+w.id+');renderDash();notif(\'ארנק נמחק\',\'var(--R)\')">מחק</button>':''}</div></div>`).join('');
+  document.getElementById('wlist').innerHTML=wallets.map(w=>`<div class="wc"><div class="wh"><div><div style="display:flex;align-items:center;gap:5px"><div class="wn" ondblclick="openRn(${w.id})">${w.label}</div>${w.def?'<span class="dbg">ברירת מחדל</span>':''}</div><div class="wa" title="${w.addr}">${trA(w.addr)}</div></div><div style="text-align:left"><div class="wb">${fU(w.bal)}</div><div class="wbl">USDC · ${w.matic} MATIC</div></div></div><div style="display:flex;gap:4px;flex-wrap:wrap"><button class="btn bsm" onclick="copyA(${w.id})">העתק כתובת</button><button class="btn bsm" onclick="notif('שלח USDC (Polygon) לכתובת')">הפקד</button><button class="btn bsm" onclick="openRn(${w.id})">שנה שם</button>${w.bal===0&&!w.def?'<button class="btn bsm br_" onclick="wallets=wallets.filter(x=>x.id!=='+w.id+');renderDash();notif(\'ארנק נמחק\',\'var(--R)\')">מחק</button>':''}${_pmApprovalBtn(w)}</div></div>`).join('');
   var opts=wallets.map(w=>`<option value="${w.id}">${w.label} (${fU(w.bal)})</option>`).join('');
   ['fsel','tsel','wsel'].forEach(id=>{var e=document.getElementById(id);if(e)e.innerHTML=opts;});
   document.getElementById('tot-u').textContent=fU(wallets.reduce((s,w)=>s+w.bal,0));
   document.getElementById('wcnt').textContent=wallets.length;
   updateTFA();
+}
+async function pmCheckAndApprove(id){
+  var w=wallets.find(x=>x.id===id); if(!w)return;
+  w.pmStatus='loading'; renderDash();
+  try{
+    var r=await fetch(BACKEND+'/api/wallets/'+id+'/approval-status',{headers:{'Authorization':'Bearer '+PT_tok}});
+    if(!r.ok) throw new Error('status '+r.status);
+    var d=await r.json();
+    if(d.ready){w.pmStatus='ready';renderDash();notif('ארנק כבר מאושר לטריידינג אמיתי ✓','var(--G)');return;}
+    // Not approved — show details and ask to approve
+    var parts=[];
+    if(!d.usdc_exchange) parts.push('USDC→CTF');
+    if(!d.usdc_neg_risk_exchange) parts.push('USDC→NegRisk');
+    if(!d.ctf_exchange) parts.push('CTF Exchange');
+    if(!d.ctf_neg_risk_exchange) parts.push('CTF NegRisk');
+    if(!d.ctf_neg_risk_adapter) parts.push('CTF Adapter');
+    var msg='חסרים '+parts.length+' אישורים: '+parts.join(', ')+'.\nנדרש ~0.005-0.02 MATIC לעמלות gas.\nלהמשיך?';
+    if(!confirm(msg)){w.pmStatus=null;renderDash();return;}
+    // Execute approvals
+    w.pmStatus='approving'; renderDash();
+    var r2=await fetch(BACKEND+'/api/wallets/'+id+'/approve-polymarket',{method:'POST',headers:{'Authorization':'Bearer '+PT_tok}});
+    if(!r2.ok){var e=await r2.json().catch(()=>({}));throw new Error(e.detail||'שגיאה');}
+    var res=await r2.json();
+    if(res.success){
+      w.pmStatus='ready'; renderDash();
+      var done=(res.submitted||[]).filter(x=>x.confirmed).length;
+      var skip=(res.skipped||[]).length;
+      notif('✅ אישורים הושלמו! ('+done+' ביצוע, '+skip+' קיימים)','var(--G)');
+    }else{
+      w.pmStatus=null; renderDash();
+      notif('חלק מהאישורים נכשלו — בדוק יתרת MATIC','var(--R)');
+    }
+  }catch(e){w.pmStatus=null;renderDash();notif('שגיאה: '+e.message,'var(--R)');}
 }
 function copyA(id){var w=wallets.find(x=>x.id===id);if(!w)return;if(navigator.clipboard)navigator.clipboard.writeText(w.addr).then(()=>notif('כתובת מלאה הועתקה!')).catch(()=>notif('כתובת: '+w.addr));else notif('כתובת: '+w.addr);}
 function createW(){var lbl=document.getElementById('nwname').value.trim();if(!lbl){notif('הכנס שם','var(--R)');return;}wallets.push({id:wid++,label:lbl,addr:mkA(),bal:0,matic:0,def:false,copyFor:null});hideMo('nwm');renderDash();notif('ארנק חדש נוצר! '+lbl);}
@@ -2133,15 +2173,33 @@ async function PT_loadDash() {
           addr: w.address || '0x...',
           bal: parseFloat(w.cached_usdc_balance || w.balance || 0),
           matic: parseFloat(w.cached_matic_balance || 0),
-          def: !!w.is_default, copyFor: null
+          def: !!w.is_default, copyFor: null,
+          pmStatus: null  // null=unchecked, 'ready', 'loading', 'approving'
         };
       });
       renderDash();
       var tot = wallets.reduce(function(s, w) { return s + w.bal; }, 0);
       var te = document.getElementById('tot-u'); if (te) te.textContent = '$' + tot.toFixed(2);
       var we = document.getElementById('wcnt'); if (we) we.textContent = wallets.length;
+      // Background-check approval status for each wallet
+      wallets.forEach(function(w) { PT_checkPMStatus(w.id); });
     }
   } catch(e) { console.warn('dash:', e); }
+}
+
+async function PT_checkPMStatus(id) {
+  if (!PT_tok) return;
+  try {
+    var r = await fetch(BACKEND + '/api/wallets/' + id + '/approval-status',
+      {headers: {'Authorization': 'Bearer ' + PT_tok}});
+    if (!r.ok) return;
+    var d = await r.json();
+    var w = wallets.find(function(x) { return x.id === id; });
+    if (!w) return;
+    w.pmStatus = d.ready ? 'ready' : null;
+    // Only re-render if dash page is visible
+    if (document.getElementById('pg-dash') && document.getElementById('pg-dash').classList.contains('on')) renderDash();
+  } catch(e) { /* silent */ }
 }
 
 async function PT_detectBots() {
