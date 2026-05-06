@@ -309,8 +309,47 @@ body{font-size:var(--sz-font)!important}
       <div class="sr"><div class="si"><div class="stit">רשימת כתובות מאושרות</div><div class="sdesc">משיכות רק לכתובות שאישרת</div></div><div style="display:flex;align-items:center;gap:5px"><span id="wlbdg" class="soff">כבוי</span><button class="btn bsm" onclick="showMo('wlm');renderWL()">נהל</button></div></div>
       <div class="sr"><div class="si"><div class="stit">ניתוק אוטומטי</div></div><select class="fi" style="width:95px;font-size:9px"><option>30 דקות</option><option selected>שעה</option><option>4 שעות</option></select></div>
       <div class="sr"><div class="si"><div class="stit">הגבלת משיכה יומית</div></div><div style="display:flex;align-items:center;gap:5px"><span style="color:var(--tx3)">$</span><input class="fi" type="number" value="1000" style="width:70px;font-size:10px"/><button class="btn bsm" onclick="notif('מגבלה נשמרה!')">שמור</button></div></div>
+      <div class="sr"><div class="si"><div class="stit">גיבוי מוצפן של ארנקים</div><div class="sdesc">AES-256-GCM · הקובץ קריא רק עם הסיסמה שלך</div></div><div style="display:flex;align-items:center;gap:5px"><button class="btn bsm" onclick="showMo('bkexm')">📥 ייצוא</button><button class="btn bsm" onclick="showMo('bkimm')">📤 שחזור</button></div></div>
     </div>
   </div>
+
+  <!-- ── Backup Export Modal ── -->
+  <div class="mo" id="bkexm"><div class="mob" style="max-width:340px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="font-size:13px;font-weight:600;color:var(--tx)">📥 ייצוא גיבוי מוצפן</div>
+      <button class="btn bsm" onclick="hideMo('bkexm')">✕</button>
+    </div>
+    <div style="background:var(--Gb);border:1px solid var(--G)44;border-radius:7px;padding:9px;margin-bottom:11px;font-size:10px;color:var(--tx2)">
+      הגיבוי מוצפן עם <strong>AES-256-GCM + PBKDF2</strong> (200K סיבובים).<br>
+      גם אם מישהו יפתח את הקובץ — לא יוכל לקרוא אותו ללא הסיסמה.
+    </div>
+    <div class="fl">סיסמת הצפנה (מינ׳ 8 תווים)</div>
+    <input class="fi" type="password" id="bkpw1" placeholder="סיסמה חזקה..." style="margin-top:4px"/>
+    <div class="fl" style="margin-top:8px">אמת סיסמה</div>
+    <input class="fi" type="password" id="bkpw2" placeholder="חזור על הסיסמה..." style="margin-top:4px"/>
+    <div id="bkerr" style="display:none;font-size:10px;color:var(--R);margin-top:6px"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:12px">
+      <button class="btn" onclick="hideMo('bkexm')">ביטול</button>
+      <button class="btn bp" onclick="doBackupExport()">הורד גיבוי מוצפן</button>
+    </div>
+  </div></div>
+
+  <!-- ── Backup Import Modal ── -->
+  <div class="mo" id="bkimm"><div class="mob" style="max-width:340px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="font-size:13px;font-weight:600;color:var(--tx)">📤 שחזור ארנקים מגיבוי</div>
+      <button class="btn bsm" onclick="hideMo('bkimm')">✕</button>
+    </div>
+    <div class="fl">קובץ גיבוי (.json)</div>
+    <input type="file" id="bkfile" accept=".json" style="margin-top:4px;width:100%;font-size:10px;color:var(--tx2)"/>
+    <div class="fl" style="margin-top:8px">סיסמת הצפנה</div>
+    <input class="fi" type="password" id="bkimpw" placeholder="הסיסמה שהשתמשת בייצוא..." style="margin-top:4px"/>
+    <div id="bkimerr" style="display:none;font-size:10px;color:var(--R);margin-top:6px"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:12px">
+      <button class="btn" onclick="hideMo('bkimm')">ביטול</button>
+      <button class="btn bp" onclick="doBackupImport()">שחזר ארנקים</button>
+    </div>
+  </div></div>
 
   <div class="pg" id="pg-traders">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
@@ -580,6 +619,65 @@ function open2FA(){
 function verify2FA(){var code=Array.from({length:6},(_,i)=>document.getElementById('otp'+i)?.value||'').join('');if(code.length===6){tfaOn=true;updateTFA();hideMo('tfam');notif('2FA הופעל!');}else{document.getElementById('otperr').style.display='block';}}
 function renderWL(){var e=document.getElementById('wllist'),em=document.getElementById('wlemp'),bd=document.getElementById('wlbdg');bd.textContent=wlist2.length?'פעיל ('+wlist2.length+')':'כבוי';bd.className=wlist2.length?'son':'soff';if(!wlist2.length){e.innerHTML='';em.style.display='block';return;}em.style.display='none';e.innerHTML=wlist2.map((a,i)=>`<div style="display:flex;align-items:center;gap:5px;padding:5px;background:var(--bg3);border-radius:6px;margin-bottom:4px"><div style="flex:1;font-size:9px;font-family:monospace;color:var(--tx2);word-break:break-all">${a}</div><button class="btn bsm br_" onclick="wlist2.splice(${i},1);renderWL();notif('הוסרה','var(--R)')">הסר</button></div>`).join('');}
 function addWL(){var v=document.getElementById('wladdr').value.trim();if(!v.startsWith('0x')){notif('כתובת לא תקינה','var(--R)');return;}if(wlist2.indexOf(v)!==-1){notif('כבר ברשימה','var(--A)');return;}wlist2.push(v);document.getElementById('wladdr').value='';renderWL();notif('כתובת נוספה!');}
+
+// ── Encrypted Backup Export ──
+async function doBackupExport(){
+  var pw1=document.getElementById('bkpw1').value;
+  var pw2=document.getElementById('bkpw2').value;
+  var err=document.getElementById('bkerr');
+  err.style.display='none';
+  if(pw1.length<8){err.textContent='סיסמה חייבת להיות לפחות 8 תווים';err.style.display='block';return;}
+  if(pw1!==pw2){err.textContent='הסיסמאות לא תואמות';err.style.display='block';return;}
+  if(!PT_tok||!PT_uid){err.textContent='לא מחובר — התחבר תחילה';err.style.display='block';return;}
+  try{
+    var r=await fetch(BACKEND+'/api/wallets/'+PT_uid+'/export-backup',{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+PT_tok,'Content-Type':'application/json'},
+      body:JSON.stringify({password:pw1})
+    });
+    if(!r.ok){var e=await r.json().catch(()=>({}));err.textContent=e.detail||'שגיאה בייצוא';err.style.display='block';return;}
+    var data=await r.json();
+    // Download as encrypted JSON file
+    var blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+    var url=URL.createObjectURL(blob);
+    var a=document.createElement('a');
+    var ts=new Date().toISOString().slice(0,10);
+    a.href=url; a.download='polytrade-backup-'+ts+'.json';
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+    hideMo('bkexm');
+    document.getElementById('bkpw1').value='';
+    document.getElementById('bkpw2').value='';
+    notif('✅ גיבוי מוצפן הורד! שמור אותו במקום בטוח.','var(--G)');
+  }catch(e){err.textContent='שגיאה: '+e.message;err.style.display='block';}
+}
+
+// ── Encrypted Backup Import ──
+async function doBackupImport(){
+  var pw=document.getElementById('bkimpw').value;
+  var fileIn=document.getElementById('bkfile');
+  var err=document.getElementById('bkimerr');
+  err.style.display='none';
+  if(!pw){err.textContent='הכנס סיסמה';err.style.display='block';return;}
+  if(!fileIn.files||!fileIn.files[0]){err.textContent='בחר קובץ גיבוי';err.style.display='block';return;}
+  if(!PT_tok||!PT_uid){err.textContent='לא מחובר';err.style.display='block';return;}
+  try{
+    var txt=await fileIn.files[0].text();
+    var backup=JSON.parse(txt);
+    var r=await fetch(BACKEND+'/api/wallets/'+PT_uid+'/import-backup',{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+PT_tok,'Content-Type':'application/json'},
+      body:JSON.stringify({password:pw,backup:backup})
+    });
+    var d=await r.json().catch(()=>({}));
+    if(!r.ok){err.textContent=d.detail||'שגיאה בשחזור';err.style.display='block';return;}
+    hideMo('bkimm');
+    document.getElementById('bkimpw').value='';
+    fileIn.value='';
+    notif('✅ שוחזרו '+d.restored+' ארנקים ('+d.skipped+' קיימים)','var(--G)');
+    await PT_loadDash();
+  }catch(e){err.textContent='שגיאה: '+e.message;err.style.display='block';}
+}
 
 // ── TRADERS ──
 function tRowH(t){return`<div class="tr" onclick="openProfile(${t.id})"><div class="tav" style="background:${t.c}22;color:${t.c}">${t.n.slice(1,3).toUpperCase()}</div><div style="flex:1;min-width:65px"><div class="tn">${t.n}</div><div class="tsb">${fN(t.trades)} עסקאות · ${t.s}</div></div><div class="tst"><div class="tc"><div class="tv" style="color:${t.roi>=0?'var(--G)':'var(--R)'}">${fP(t.roi)}</div><div class="tl">ROI</div></div><div class="tc"><div class="tv" style="color:var(--G)">${fC(t.pnl)}</div><div class="tl">PnL</div></div><div class="tc"><div class="tv">${t.win.toFixed(1)}%</div><div class="tl">Win Rate</div></div><div class="tc"><div class="tv" style="color:var(--tx2)">${fC(t.vol)}</div><div class="tl">Volume</div></div></div><div style="display:flex;gap:4px;flex-shrink:0;margin-right:5px" onclick="event.stopPropagation()"><button class="btn bp bsm" onclick="openCopyModal('${t.n}')">+ קופי</button><button class="btn bsm" onclick="openProfile(${t.id})">פרופיל</button><button class="btn bsm" onclick="saveTrd('${t.n}','${t.s}',${t.roi},${t.pnl},${t.id})">מעקב</button></div></div>`;}
